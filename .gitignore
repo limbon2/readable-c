@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+# Copies of the eval fixtures that agents edit during an eval run.
+evals/workspaces/

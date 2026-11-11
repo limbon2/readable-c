@@ -1,0 +1,5 @@
+* text=auto eol=lf
+# C fixtures keep their exact bytes (CRLF line endings, CP1251 comments),
+# because the tests check that the tool preserves them.
+tests/fixtures/** -text
+evals/files/** -text

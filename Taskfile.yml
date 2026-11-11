@@ -1,0 +1,29 @@
+version: '3'
+
+# Every workflow of this repository. Task is optional: each command is a plain
+# `uv run` that also works without it.
+
+tasks:
+  fmt:
+    desc: Fix what ruff can fix, then format the Python code
+    cmds:
+      - uv run ruff check --fix --quiet .
+      - uv run ruff format --quiet .
+
+  lint:
+    desc: Lint and format-check the Python code, then check the package files
+    cmds:
+      - uv run ruff check .
+      - uv run ruff format --check .
+      - uv run python tools/validate_package.py
+
+  test:
+    desc: Run the unit and command tests
+    cmds:
+      - uv run pytest
+
+  ci:
+    desc: Run every check a change must pass
+    cmds:
+      - task: lint
+      - task: test

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Readable C"
+  short_description: "Refactor C into readable code, one region of a file at a time"
+  default_prompt: "Use $readable-c to make the function <name> in <file> readable without changing anything else in the file."

@@ -1,0 +1,50 @@
+{
+  "skill_name": "readable-c",
+  "evals": [
+    {
+      "id": 1,
+      "name": "whole-function",
+      "prompt": "In inventory.c, make the function `report` readable. Don't change anything else in the file.",
+      "files": ["evals/files/inventory.c"],
+      "selection": {"function": ["report"]},
+      "expected_output": "report() is flattened (early continue or guard clauses), the nested ?: is gone, names say what they hold, and `flags & 1 == 1` keeps its meaning `flags & (1 == 1)`, either parenthesized as such or folded to the same test, with the reasoning in the report. Nothing outside report() changes.",
+      "assertions": [
+        "the guard passes against the original file with report() as the region",
+        "verify reports no errors (parse, dialect, names, frozen)",
+        "report() reaches tier 1, or the report explains every tier 2 review item",
+        "the test `flags & 1 == 1` keeps its current meaning, and the report says what that meaning is",
+        "the report follows the template in SKILL.md"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "line-range",
+      "prompt": "Lines 47-74 of netio.c, inside handle_packet, are hard to follow. Clean up just that block and leave the rest of the file alone.",
+      "files": ["evals/files/netio.c"],
+      "selection": {"lines": ["47-74"]},
+      "expected_output": "The frame loop reads as named steps; any helper goes in the slot before handle_packet; the locals k and c that the code after the range does not use may be renamed only if they stay correct for the code before the range. Lines 28-46 and 75-81 do not change.",
+      "assertions": [
+        "the guard passes with the line range and its helper slot as the regions",
+        "verify reports no errors (parse, dialect, names, frozen)",
+        "every tier 2 review item is explained in the report",
+        "no C99 construct is introduced (the file has none)",
+        "the report follows the template in SKILL.md"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "two-functions-crlf-cp1251",
+      "prompt": "Untangle read_weight and is_stable in legacy.c.",
+      "files": ["evals/files/legacy.c"],
+      "selection": {"function": ["read_weight", "is_stable"]},
+      "expected_output": "Both functions read better; the CHECK macro (which hides a goto) stays in read_weight; is_stable keeps returning TRUE or FALSE values; the file keeps CRLF line endings and its CP1251 comments byte for byte.",
+      "assertions": [
+        "the guard passes against the original file with both functions as regions",
+        "the bytes outside the regions are identical, CRLF and CP1251 included",
+        "verify reports no errors (parse, dialect, names, frozen)",
+        "CHECK stays in read_weight and is not moved into a helper",
+        "the report follows the template in SKILL.md"
+      ]
+    }
+  ]
+}
