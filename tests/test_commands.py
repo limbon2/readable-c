@@ -112,6 +112,22 @@ def test_repair_after_line_endings_and_encoding_changed(run_cli, fixture_copy):
     assert run_cli("verify", str(path)).code == 0
 
 
+def test_utf8_comments_in_a_cp1251_file_are_caught_and_converted(run_cli, fixture_copy):
+    path = fixture_copy("legacy.c")
+    original = path.read_bytes()
+    run_cli("start", str(path), "--function", "is_stable")
+    comment = "    /* разность двух показаний */\r\n"
+    anchor = b"    int d = a - b;\r\n"
+    path.write_bytes(original.replace(anchor, comment.encode("utf-8") + anchor))
+    verified = run_cli("verify", str(path))
+    assert verified.code == 1
+    assert "Run `repair --encoding cp1251`" in verified.out
+    assert run_cli("repair", str(path)).code == 2
+    assert run_cli("repair", str(path), "--encoding", "cp1251").code == 0
+    assert path.read_bytes() == original.replace(anchor, comment.encode("cp1251") + anchor)
+    assert run_cli("verify", str(path)).code == 0
+
+
 def test_restore_returns_the_regions(run_cli, fixture_copy):
     path = fixture_copy("inventory.c")
     original = path.read_bytes()

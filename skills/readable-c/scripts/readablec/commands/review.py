@@ -6,7 +6,7 @@ import difflib
 from collections.abc import Sequence
 from pathlib import Path
 
-from .. import includes
+from .. import guard, includes
 from ..findings import RULE, Finding, mark_new
 from ..issues import ERROR, REVIEW, Issue
 from ..rules import run_rules
@@ -86,6 +86,11 @@ def verify(
     new_spans = session.spans
     known = includes.known_names(path, new.tokens, include_dirs)
     issues: list[Issue] = list(session.result.issues)
+    issues.extend(
+        guard.foreign_text_issues(
+            session.snapshot.original, session.regions, session.current, new_spans
+        )
+    )
     issues.extend(names.parse_issues(old, session.regions, new, new_spans))
     issues.extend(names.dialect_issues(old, new, new_spans))
     issues.extend(names.unresolved_names(old, new, new_spans, known))

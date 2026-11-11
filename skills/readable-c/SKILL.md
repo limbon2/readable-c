@@ -47,7 +47,7 @@ uv run <skill-folder>/scripts/readable_c.py <command> <file> [options]
 2. Settle the scope. Use the functions or lines the user named. For a whole file, run `outline` and take one function at a time, or `start --all` when file-scope changes (statics, constants) are wanted. If the request is unclear, ask which functions or lines.
 3. Run `start` with that scope and read what it prints: the region text, the declarations and macros it uses (flagged macros hide a `return` or `goto`, or evaluate an argument twice), the frozen names, the conventions and the baseline findings.
 4. Before the first edit, read [references/rules.md](references/rules.md) and [references/hazards.md](references/hazards.md).
-5. Refactor in small steps, in this order: names, control flow, conditions and expressions, constants, extracting helpers, comments. After each step run `verify`. Fix every error it reports before the next step.
+5. Refactor in small steps, in this order: names, control flow, conditions and expressions, constants, extracting helpers, then comments for whatever is still not obvious. After each step run `verify`. Fix every error it reports before the next step.
 6. Run `check`. Fix each rule finding, or keep a one-line reason for the report. A finding marked new came from your edit: fix it.
 7. If the project has a `.clang-format`, run `format`, then `verify` again.
 8. Run `verify --final`, write the report (below), and run `finish`. If the user wants the change undone, run `restore` instead.
@@ -64,11 +64,13 @@ The rules come from one idea: the reader should not have to work anything out th
 - `nested-ternary`, `unneeded-ternary`, `assignment-in-condition`, `mixed-operators`, `side-effects`: one idea per expression, with the grouping visible.
 - `magic-number`: name values that do not explain themselves.
 - `function-size`: extract parts with a responsibility of their own into static helpers. Do not add layers, wrappers or abstractions with a single use.
-- Comments explain what the code cannot: why, ordering requirements, hardware or protocol quirks. Delete comments that repeat the code and commented-out code; keep comments that carry information.
+- `needs-comment`: C that made sense to its author still stops a reader at allocations (who owns the block, why that size), bit operations (what the bits mean), casts that read memory as another type, raw `memcpy`/`memmove` offsets, and calls into third-party or system APIs (what they return on failure, who owns what they return). Add a short comment at each such place. Write only what the code, its headers or the library's documentation show; when you cannot establish a meaning, do not guess: list it under "Open questions" in the report. Comments explain why and what things mean, never what the code does step by step; delete comments that repeat the code and commented-out code.
 - `indent-style` and the conventions: new code looks like the code around it.
 - Keep using the project's own macros and idioms, such as an error-handling macro like `CHECK`, logging macros and asserts. They are the code base's conventions, so expanding one by hand needs a reason in the report.
 
-Advice findings (`magic-number`, `goto`, `param-reassign`, `stacked-casts`, `multiple-declarators`, `commented-out-code`, `boolean-literal`, `function-size`) are judgment calls; act on them when the result reads better.
+Advice findings (`needs-comment`, `magic-number`, `goto`, `param-reassign`, `stacked-casts`, `multiple-declarators`, `commented-out-code`, `boolean-literal`, `function-size`) are judgment calls; act on them when the result reads better.
+
+In a file that is not UTF-8, new comments with non-ASCII text need converting: `verify` reports them and `repair --encoding <codec>` converts the new lines.
 
 ## Keep the behavior
 
@@ -130,6 +132,8 @@ Verification:
 - Review items explained: <item>: <why it is right>
 - Formatting: applied with <.clang-format> | not run: <reason>
 - Compilation and tests: not run (the tool works without a build)
+Comments added: <line>: <what it explains> | none
 Findings left: <rule at line>: <reason> | none
+Open questions: <meanings you could not establish, for the user to answer> | none
 Proposed changes outside the regions: <list> | none
 ```

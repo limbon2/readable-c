@@ -69,6 +69,7 @@ Runs the guard, then:
 | Check | Severity |
 | --- | --- |
 | new syntax errors in the regions | error |
+| new lines that hold UTF-8 text in a file that is not UTF-8 (fix with `repair --encoding`) | error |
 | C constructs the original file never uses (dialect) | error |
 | names that resolve nowhere (likely a typo or a missed rename) | error, or review when some headers could not be read |
 | a new local that hides an outer name; a name declared twice in one block; a `const` local that is assigned; a `goto` without its label | error |
@@ -84,7 +85,7 @@ Needs a `.clang-format` (or `_clang-format`) in the file's folder or above. The 
 
 ### repair FILE [--encoding CODEC]
 
-For a guard failure caused by line endings, BOM, trailing white space, the final newline or encoding. See [regions.md](regions.md#line-endings-and-encodings).
+For a guard failure caused by line endings, BOM, trailing white space, the final newline or encoding. When the guard passes, it converts new region lines that hold UTF-8 text in a file that is not UTF-8, such as a new comment in a CP1251 file; that needs `--encoding`. See [regions.md](regions.md#line-endings-and-encodings).
 
 ### restore FILE [--whole-file]
 

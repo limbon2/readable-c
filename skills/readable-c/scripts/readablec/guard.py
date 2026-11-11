@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from . import lexer
+from .encoding import guess_legacy_encoding
 from .issues import ERROR, REVIEW, Issue
 from .regions import Region
 from .source import UTF8_BOM, SourceText, count_line_endings
@@ -514,15 +515,100 @@ def _reencode_line(content: bytes, known_lines: dict[bytes, bytes], encoding: st
     key = normalize(content, is_start=False, is_end=True).data
     if key in known_lines:
         return known_lines[key]
+    if not holds_utf8_text(content):
+        return content
     if encoding is None:
         raise RepairError(
             "A changed line in a region holds non-ASCII text and the file is not UTF-8. "
             "Run `repair --encoding <codec>` with the file's encoding (see `doctor`)."
         )
+    return _encode_line(content, encoding)
+
+
+def _encode_line(content: bytes, encoding: str) -> bytes:
     try:
         return content.decode("utf-8").encode(encoding)
     except (UnicodeDecodeError, UnicodeEncodeError, LookupError) as error:
         raise RepairError(f"Cannot convert a changed line to {encoding}: {error}.") from error
+
+
+def holds_utf8_text(content: bytes) -> bool:
+    """True for a line with non-ASCII text that decodes as UTF-8.
+
+    Text in a single-byte code page such as CP1251 almost never does: its letters
+    are bytes from 0xC0 up, and UTF-8 needs bytes below 0xC0 after each of those.
+    """
+    if content.isascii():
+        return False
+    try:
+        content.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def foreign_text_issues(
+    original: bytes, regions: Sequence[Region], current: bytes, spans: Sequence[Span]
+) -> list[Issue]:
+    """New lines that hold UTF-8 text in a file that is not UTF-8, such as a new
+    Russian comment written into a CP1251 file."""
+    if _is_utf8(original):
+        return []
+    encoding = guess_legacy_encoding(original)
+    source = SourceText(current)
+    issues = []
+    for line_start, content in _new_lines(original, regions, current, spans):
+        if holds_utf8_text(content):
+            issues.append(
+                Issue(
+                    "encoding",
+                    ERROR,
+                    f"This new line holds UTF-8 text, but the file is not UTF-8 (it looks like "
+                    f"{encoding}), so editors would show it garbled. Run `repair --encoding "
+                    f"{encoding}` to convert the new lines, or write them in ASCII.",
+                    source.line_of(line_start),
+                )
+            )
+    return issues
+
+
+def _new_lines(
+    original: bytes, regions: Sequence[Region], current: bytes, spans: Sequence[Span]
+) -> list[tuple[int, bytes]]:
+    """(offset, content) of every region line that the original region did not have."""
+    found = []
+    for region, (start, end) in zip(regions, spans, strict=True):
+        known = set(original[region.start : region.end].splitlines())
+        offset = start
+        for line in current[start:end].splitlines(keepends=True):
+            content = line.rstrip(b"\r\n")
+            if content not in known:
+                found.append((offset, content))
+            offset += len(line)
+    return found
+
+
+def convert_new_text(
+    original: bytes,
+    regions: Sequence[Region],
+    current: bytes,
+    spans: Sequence[Span],
+    encoding: str,
+) -> bytes:
+    """The current file with new UTF-8 region lines encoded in `encoding`."""
+    pieces = []
+    cursor = 0
+    for region, (start, end) in zip(regions, spans, strict=True):
+        pieces.append(current[cursor:start])
+        known = set(original[region.start : region.end].splitlines())
+        for line in current[start:end].splitlines(keepends=True):
+            content = line.rstrip(b"\r\n")
+            ending = line[len(content) :]
+            is_foreign = content not in known and holds_utf8_text(content)
+            pieces.append((_encode_line(content, encoding) if is_foreign else content) + ending)
+        cursor = end
+    pieces.append(current[cursor:])
+    return b"".join(pieces)
 
 
 def restore(

@@ -4,6 +4,12 @@ All notable changes to readable-c are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- The `needs-comment` advice rule points at code a reader cannot follow alone when no comment explains it: allocations with a computed size or an owner outside the function, `realloc`, raw memory copies with computed offsets, bit operations with literal masks and shifts, reads through pointer casts, and calls into third-party or system APIs.
+- Guidance for explanatory comments: what to say for each kind of place, comments taken only from the code, headers and documentation, and open questions in the report for meanings that cannot be established. The report template has "Comments added" and "Open questions".
+- `verify` reports new lines with UTF-8 text in a file that is not UTF-8, and `repair --encoding` converts them while the guard passes.
+
 ### Security
 
 - Snapshots live in a per-user folder created readable by its owner only. The tool refuses a state folder that is a link or that another user owns, writes snapshots without following a link planted at their names, and refuses a snapshot that belongs to another file. Before, on a shared temp folder such as Linux's /tmp, another local user could make `start` overwrite a file through a planted link, or make `restore --whole-file` write a planted snapshot into a source file.

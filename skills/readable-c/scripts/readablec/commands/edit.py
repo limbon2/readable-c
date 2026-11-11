@@ -10,6 +10,7 @@ from .common import (
     EXIT_FINDINGS,
     CommandError,
     Output,
+    Session,
     display_path,
     open_session,
     print_issue,
@@ -50,9 +51,7 @@ def repair(path: Path, encoding: str | None, as_json: bool) -> int:
     output = Output(as_json)
     session = open_session(path)
     if session.result.spans is not None:
-        output.line("repair: nothing to repair; the frozen text is intact.")
-        output.json({"repaired": False})
-        return EXIT_CLEAN
+        return _convert_new_text(output, path, session, encoding)
     try:
         repaired = guard.repair(
             session.snapshot.original, session.regions, session.current, encoding
@@ -67,6 +66,29 @@ def repair(path: Path, encoding: str | None, as_json: bool) -> int:
         print_issue(output, path, issue)
     output.json({"repaired": True, "guard": after.ok})
     return EXIT_CLEAN if after.ok else EXIT_FINDINGS
+
+
+def _convert_new_text(output: Output, path: Path, session: Session, encoding: str | None) -> int:
+    """With the frozen text intact, the only repair left is new UTF-8 text in a legacy file."""
+    original, regions, spans = session.snapshot.original, session.regions, session.spans
+    foreign = guard.foreign_text_issues(original, regions, session.current, spans)
+    if not foreign:
+        output.line("repair: nothing to repair; the frozen text is intact.")
+        output.json({"repaired": False})
+        return EXIT_CLEAN
+    if encoding is None:
+        raise CommandError(
+            f"{len(foreign)} new line(s) hold UTF-8 text in a file that is not UTF-8. Run "
+            "`repair --encoding <codec>` with the file's encoding (`verify` and `doctor` show a guess)."
+        )
+    try:
+        converted = guard.convert_new_text(original, regions, session.current, spans, encoding)
+    except guard.RepairError as error:
+        raise CommandError(str(error)) from error
+    write_file(path, converted)
+    output.line(f"repair: converted {len(foreign)} new line(s) to {encoding}.")
+    output.json({"repaired": True, "converted_lines": len(foreign), "encoding": encoding})
+    return EXIT_CLEAN
 
 
 def restore(path: Path, whole_file: bool, as_json: bool) -> int:

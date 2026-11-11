@@ -75,6 +75,7 @@ The rules and the verification discipline come from the Mannie project's `AGENTS
 | ESLint `no-nested-ternary`, `no-else-return`, `no-lonely-if`, `curly`, `no-unneeded-ternary`, `no-param-reassign` | `nested-ternary`, `else-after-return`, `lonely-if`, `missing-braces`, `unneeded-ternary`, `param-reassign` |
 | The custom ESLint rule `mannie/named-conditions` and its tests | `named-conditions`, with the same test cases in C |
 | Clippy's size lints | `function-size` |
+| "Comments explain what the code cannot" | `needs-comment`, which points at allocations, bit operations, memory casts and library calls without a comment, and the guidance for comments that are true |
 | Narrow suppressions that state a reason | no markers in the user's code; every finding left gets a reason in the report |
 | "Improve the code you touch, do not reformat unrelated files" | regions and the guard |
 | "Never claim a check passed unless it ran" | the report template |

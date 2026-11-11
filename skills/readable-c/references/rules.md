@@ -278,11 +278,57 @@ Keep using the project's own macros and idioms: error-handling macros such as `C
 
 ## Comments
 
-- Keep and improve comments that explain what the code cannot: why, ordering, units, hardware and protocol quirks, the reason for a workaround.
-- Delete comments that repeat the code (`i++; /* increment i */`).
-- `commented-out-code` (advice): delete disabled code; version control keeps it. Ask first when the project has no version control.
-- Keep license headers, author notes and anything else whose purpose is not code.
-- Write new comments in the file's language and comment style. A file without `//` comments gets `/* */` ones.
+A comment answers the question a reader would stop at, which the code cannot answer itself. C has many such places: memory that changes hands, bits packed into a word, bytes read as another type, calls into libraries with conventions of their own. Write a short comment at each of them, and nowhere else.
+
+### needs-comment (advice)
+
+`check` points at these places when no comment sits on the same lines or on the two lines above:
+
+| Kind | Flagged when | The comment says |
+| --- | --- | --- |
+| allocation | `realloc` always; `malloc`, `calloc`, `strdup` and the like when the size is computed or the block is returned or stored in a structure | who owns the block and who frees it; why the size is what it is; for `realloc`, what happens when it fails |
+| raw memory | `memcpy`, `memmove`, `memset`, `memcmp`, `strncpy`, `strncat` with computed offsets or sizes | what is copied or moved, and why the offsets and sizes are right |
+| bits | shifts and masks with literal numbers, and `&=`, `\|=`, `^=`, `<<=`, `>>=` with literals | what the bits mean: the field, the encoding or the trick |
+| reinterpreted memory | reading through a pointer cast: `*(T *)p`, `((T *)p)->x`, `((T *)p)[i]` | what the bytes are, and what the cast assumes about layout, byte order and alignment |
+| library calls | calls into a non-standard system or third-party header the file includes (`<windows.h>`, `<openssl/ssl.h>`) | what the call does here: its result on failure, who owns what it returns, its units |
+
+```c
+buf = malloc(len + 1);  /* +1 for the terminating NUL; the caller frees buf */
+
+/* bits 4-7 of the status byte hold the channel number */
+channel = (status >> 4) & 0x0F;
+
+length = frame[1] | (frame[2] << 8);  /* 16-bit little-endian length field */
+
+/* CRC-16/MODBUS: 0xA001 is the polynomial 0x8005 with its bits reversed */
+crc = (crc & 1) ? (crc >> 1) ^ 0xA001 : crc >> 1;
+
+/* Drop the frame just handled: its header and body. */
+memmove(link->buf, link->buf + HDR_LEN + body_len, link->len - HDR_LEN - body_len);
+
+/* Wait up to 500 ms; WAIT_TIMEOUT means the worker has not finished. */
+if (WaitForSingleObject(worker, 500) == WAIT_TIMEOUT) {
+```
+
+A name often says it better than a comment: `enum { CHANNEL_SHIFT = 4, CHANNEL_MASK = 0x0F };` inside the function (see `magic-number`). A comment changes no token and a named enum constant is proven by tier 1, so neither puts behavior at risk.
+
+### Only true comments
+
+A wrong comment is worse than none, because the reader trusts it. Write only what the code, the file, its headers or the library's documentation show:
+
+- Take the meaning of a bit, a field or an offset from how the code uses it: where it is set, what it is compared with, the names of the macros and fields around it. `start` lists the declarations and macros the region uses, and `outline` shows where else the file has them.
+- Take what a library call does from its declaration and documentation (the header in the project, the vendor's documentation), never from its name alone.
+- When the meaning cannot be established, do not guess and do not write a vague comment. Leave the code as it is and put the question under "Open questions" in the report, for example "What does bit 0 of `item.flags` mean?".
+- Say "assumes" when the code relies on something it never checks: `/* assumes a little-endian host */`.
+
+### Placement and style
+
+- Put a comment above the line or block it explains, or at the end of a short line. One line is usually enough.
+- Say why, or what something means. Never narrate what the code does step by step: `i++; /* increment i */` repeats the code, so delete such comments.
+- Use the file's comment style (`/* */` in a file without `//` comments) and the language of its other comments.
+- In a file that is not UTF-8 (`doctor` shows the encoding, for example cp1251), new non-ASCII text needs converting: `verify` reports it, and `repair --encoding cp1251` converts the new lines. Plain ASCII avoids the step.
+- Keep comments that carry information, such as license headers, author notes and the reasons for workarounds. Rewrite a comment that the refactor made wrong.
+- `commented-out-code` (advice): delete disabled code, because version control keeps it. Ask first when the project has no version control.
 
 ## Layout
 
@@ -299,4 +345,4 @@ Work in small steps and run `verify` after each, so that each step reaches tier 
 3. Conditions and expressions.
 4. Constants.
 5. Helpers (tier 2: explain them).
-6. Comments.
+6. Comments for what is still not obvious (`needs-comment`), and open questions for what you could not establish.

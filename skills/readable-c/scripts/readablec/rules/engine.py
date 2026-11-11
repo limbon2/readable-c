@@ -11,9 +11,10 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import TYPE_CHECKING
 
-from .. import syntax
+from .. import includes, lexer, syntax
 from ..findings import Finding
 
 if TYPE_CHECKING:
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from ..analysis import Analysis
     from ..conventions import Conventions
     from ..functions import FunctionSpan
+    from ..includes import KnownNames
 
 Span = tuple[int, int]
 RuleFunction = Callable[["Node", "RuleContext"], None]
@@ -37,10 +39,32 @@ class RuleContext:
     frozen_names: set[str]
     function: FunctionSpan | None = None
     findings: list[Finding] = field(default_factory=list)
+    reported: set[tuple[object, ...]] = field(default_factory=set)
 
     @property
     def conventions(self) -> Conventions:
         return self.analysis.conventions
+
+    @cached_property
+    def comment_lines(self) -> list[tuple[int, int]]:
+        """The first and last line of every comment in the file."""
+        source = self.analysis.source
+        return [
+            (source.line_of(token.start), source.line_of(max(token.start, token.end - 1)))
+            for token in self.analysis.tokens
+            if token.kind == lexer.COMMENT
+        ]
+
+    @cached_property
+    def known_names(self) -> KnownNames:
+        return includes.known_names(self.analysis.source.path, self.analysis.tokens)
+
+    def first_time(self, *identity: object) -> bool:
+        """True the first time a rule asks about this identity, so it reports once."""
+        if identity in self.reported:
+            return False
+        self.reported.add(identity)
+        return True
 
     def in_spans(self, node: Node) -> bool:
         return any(start <= node.start_byte < end for start, end in self.spans)
@@ -99,7 +123,7 @@ def on_lines(rule: Callable[[RuleContext], None]) -> Callable[[RuleContext], Non
 def run_rules(
     analysis: Analysis, spans: Sequence[Span], frozen_names: set[str] | None = None
 ) -> RuleReport:
-    from . import conditions, control_flow, naming, style  # noqa: F401, PLC0415  importing registers the rules
+    from . import comments, conditions, control_flow, naming, style  # noqa: F401, PLC0415  importing registers the rules
 
     context = RuleContext(
         analysis, [span for span in spans if span[0] < span[1]], frozen_names or set()

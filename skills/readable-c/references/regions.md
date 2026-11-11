@@ -54,7 +54,7 @@ Edit tools are less careful. Some rewrite the whole file with LF line endings or
 - region text gets the file's line ending;
 - in a file that was re-encoded, unchanged region lines get their original bytes back, and changed lines with non-ASCII text are encoded with `--encoding` (for example `repair --encoding cp1251`; `doctor` shows its guess).
 
-Keep non-ASCII comments in a legacy file untouched where you can.
+New text has the same problem in reverse. A comment written in the file's language, for example Russian in a CP1251 file, usually lands as UTF-8 bytes, which editors then show garbled. `verify` reports each such line as an error, and `repair --encoding cp1251` converts the new lines and leaves every other byte as it is. Keep non-ASCII comments that are already in the file untouched where you can.
 
 ## Frozen names
 
