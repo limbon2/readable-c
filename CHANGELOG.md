@@ -4,6 +4,10 @@ All notable changes to readable-c are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Security
+
+- Snapshots live in a per-user folder created readable by its owner only. The tool refuses a state folder that is a link or that another user owns, writes snapshots without following a link planted at their names, and refuses a snapshot that belongs to another file. Before, on a shared temp folder such as Linux's /tmp, another local user could make `start` overwrite a file through a planted link, or make `restore --whole-file` write a planted snapshot into a source file.
+
 ## [0.1.0] - 2026-11-11
 
 ### Added

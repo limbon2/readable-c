@@ -18,7 +18,7 @@ uv run <skill-folder>/scripts/readable_c.py <command> <file> [options]
 
 uv installs them into its own cache on first use and needs internet access once. They support Python 3.10 to 3.14; uv picks or downloads a matching Python, so a machine with only Python 3.15 still works through uv.
 
-The tool writes snapshots to `<temp>/readable-c/` (`READABLE_C_STATE_DIR` overrides it) and writes to the source file only in `format`, `repair` and `restore`.
+The tool writes snapshots to a private folder of its own, `<temp>/readable-c-<user>/` (`READABLE_C_STATE_DIR` overrides it), and writes to the source file only in `format`, `repair` and `restore`. The folder is created readable by its owner only; the tool refuses a state folder that is a link or that another user owns, and it refuses a snapshot that does not belong to the file it is used for.
 
 ## Running without uv
 

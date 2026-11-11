@@ -68,7 +68,7 @@ Keep non-ASCII comments in a legacy file untouched where you can.
 
 ## Snapshots
 
-`start` stores the original file and the regions in the OS temp folder (`READABLE_C_STATE_DIR` overrides it), never in the project. One refactor per file runs at a time: `start` refuses a second one unless `--replace`, which drops the old snapshot and starts from the file as it is now.
+`start` stores the original file and the regions in a private folder under the OS temp folder (`READABLE_C_STATE_DIR` overrides it), never in the project. One refactor per file runs at a time: `start` refuses a second one unless `--replace`, which drops the old snapshot and starts from the file as it is now.
 
 - `restore` puts the original region text back and keeps everything else as it is now. If the guard cannot find the regions, `restore --whole-file` writes back the whole file as it was at `start`, which also drops any other edits made since.
 - `finish` deletes the snapshot.
