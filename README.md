@@ -92,4 +92,5 @@ runs ruff, the format check, the package validator and the tests. Without Task: 
 
 ## Versions
 
+- **0.2.0** (2026-11-12): comments for code that is hard to follow (`needs-comment`), stale-comment and encoding checks in `verify`, private snapshot folders, and an `indent-style` fix.
 - **0.1.0** (2026-11-11): first version. See [CHANGELOG.md](CHANGELOG.md).

@@ -94,6 +94,11 @@ _HEADERS = {
 
 STANDARD_HEADERS = {header: frozenset(names.split()) for header, names in _HEADERS.items()}
 
+# Every name in the table, whichever header declares it. Files often get the
+# standard headers through other headers (WinPR, GLib), so the needs-comment rule
+# never counts these as calls into a third-party library.
+STANDARD_NAMES = frozenset().union(*STANDARD_HEADERS.values())
+
 # Names that are always available: keywords that tree-sitter reads as identifiers,
 # predefined macros and common compiler built-ins.
 ALWAYS_KNOWN = frozenset(

@@ -327,7 +327,7 @@ A wrong comment is worse than none, because the reader trusts it. Write only wha
 - Say why, or what something means. Never narrate what the code does step by step: `i++; /* increment i */` repeats the code, so delete such comments.
 - Use the file's comment style (`/* */` in a file without `//` comments) and the language of its other comments.
 - In a file that is not UTF-8 (`doctor` shows the encoding, for example cp1251), new non-ASCII text needs converting: `verify` reports it, and `repair --encoding cp1251` converts the new lines. Plain ASCII avoids the step.
-- Keep comments that carry information, such as license headers, author notes and the reasons for workarounds. Rewrite a comment that the refactor made wrong.
+- Keep comments that carry information, such as license headers, author notes and the reasons for workarounds. Rewrite a comment that the refactor made wrong: after a rename, `verify` points at old comments that still use the old name, such as a header comment that says `cb->server` once the parameter is `slot`.
 - `commented-out-code` (advice): delete disabled code, because version control keeps it. Ask first when the project has no version control.
 
 ## Layout

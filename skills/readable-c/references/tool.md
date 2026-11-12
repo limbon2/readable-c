@@ -74,6 +74,7 @@ Runs the guard, then:
 | names that resolve nowhere (likely a typo or a missed rename) | error, or review when some headers could not be read |
 | a new local that hides an outer name; a name declared twice in one block; a `const` local that is assigned; a `goto` without its label | error |
 | frozen names missing or changed | error |
+| an old comment that still mentions a local or parameter the function no longer declares (a missed rename) | review |
 | an object-like `#define` added or removed | review |
 | tier 2 inventory differences | review |
 

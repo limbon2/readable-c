@@ -2,11 +2,13 @@
 
 A region refactor must not introduce a name the code cannot resolve, must not
 hide a name the region used from outside, and must keep every name that frozen
-code depends on, with the same type.
+code depends on, with the same type. Comments that still mention a renamed name
+are reported too, because a rename that misses a comment leaves it wrong.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -299,6 +301,83 @@ def _check_frozen_label(new: Analysis, entry: dict[str, object], name: str) -> l
 
 def _without_const(type_text: str) -> str:
     return " ".join(word for word in type_text.replace("*", " * ").split() if word != "const")
+
+
+MIN_WORD_NAME = 3
+
+
+def stale_comment_issues(
+    old: Analysis, old_spans: Sequence[Span], new: Analysis, new_spans: Sequence[Span]
+) -> list[Issue]:
+    """Comments in a region function that still mention a local or parameter that the
+    function no longer declares, which is what a rename leaves behind when it misses them.
+
+    Only comment lines carried over unchanged from the original count: a missed rename
+    leaves old comments behind, while a new comment that names a protocol field such as
+    `msgType` names it on purpose."""
+    old_functions = {function.name: function for function in _touched(old, old_spans)}
+    issues = []
+    for function in _touched(new, new_spans):
+        before = old_functions.get(function.name)
+        if before is None:
+            continue
+        assert before.node is not None and function.node is not None, (
+            "_touched keeps parsed functions"
+        )
+        old_names = {symbol.name for symbol in old.scope(before.node).symbols if symbol.is_variable}
+        new_names = {symbol.name for symbol in new.scope(function.node).symbols}
+        gone = sorted(old_names - new_names - new.file_scope_names)
+        if not gone:
+            continue
+        kept_lines = _comment_lines(old, before.start, before.end)
+        for token in lexer.tokens_between(new.tokens, function.start, function.end):
+            is_region_comment = token.kind == lexer.COMMENT and _inside(token.start, new_spans)
+            if not is_region_comment:
+                continue
+            carried_over = [line for line in _split_comment(token.text) if line in kept_lines]
+            text = "\n".join(carried_over)
+            for name in gone:
+                if _mentions(text, name):
+                    issues.append(
+                        Issue(
+                            "comments",
+                            REVIEW,
+                            f"This comment still mentions `{name}`, which `{function.name}` no longer "
+                            "declares: a rename or removal left it behind. Update the comment.",
+                            new.source.line_of(token.start),
+                        )
+                    )
+    return issues
+
+
+def _comment_lines(analysis: Analysis, start: int, end: int) -> set[str]:
+    return {
+        line
+        for token in lexer.tokens_between(analysis.tokens, start, end)
+        if token.kind == lexer.COMMENT
+        for line in _split_comment(token.text)
+    }
+
+
+def _split_comment(text: bytes) -> list[str]:
+    """The lines of a comment without markers and layout, so moved comments still match."""
+    lines = []
+    for raw in text.decode("utf-8", "replace").splitlines():
+        line = raw.strip().removeprefix("/*").removesuffix("*/").removeprefix("//")
+        line = " ".join(line.strip().lstrip("*").split())
+        if line:
+            lines.append(line)
+    return lines
+
+
+def _mentions(text: str, name: str) -> bool:
+    escaped = re.escape(name)
+    if len(name) >= MIN_WORD_NAME:
+        return re.search(rf"(?<![A-Za-z0-9_]){escaped}(?![A-Za-z0-9_])", text) is not None
+    # One- and two-letter names collide with ordinary words ("a", "i", "is"), so
+    # only uses that read as code count: `cb`, cb->server, cb.server, cb[0], cb(.
+    as_code = rf"`{escaped}`|(?<![A-Za-z0-9_]){escaped}(?:->|\.[A-Za-z_]|\[|\()"
+    return re.search(as_code, text) is not None
 
 
 def dialect_issues(old: Analysis, new: Analysis, new_spans: Sequence[Span]) -> list[Issue]:

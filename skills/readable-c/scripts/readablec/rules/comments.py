@@ -209,10 +209,11 @@ def library_call_needs_comment(node: Node, context: RuleContext) -> None:
     if not name or function is None:
         return
     known = context.known_names
+    is_standard = name in stdlib.STANDARD_NAMES or name in stdlib.ALWAYS_KNOWN
     from_elsewhere = (
-        name not in context.analysis.file_scope_names
+        not is_standard
+        and name not in context.analysis.file_scope_names
         and name not in known.names
-        and name not in stdlib.ALWAYS_KNOWN
         and context.analysis.scope(function).symbol_of(node.child_by_field_name("function")) is None
     )
     if not from_elsewhere or not known.unknown_system_headers:

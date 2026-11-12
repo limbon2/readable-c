@@ -4,11 +4,18 @@ All notable changes to readable-c are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
 ### Added
 
-- The `needs-comment` advice rule points at code a reader cannot follow alone when no comment explains it: allocations with a computed size or an owner outside the function, `realloc`, raw memory copies with computed offsets, bit operations with literal masks and shifts, reads through pointer casts, and calls into third-party or system APIs.
+- The `needs-comment` advice rule points at code a reader cannot follow alone when no comment explains it: allocations with a computed size or an owner outside the function, `realloc`, raw memory copies with computed offsets, bit operations with literal masks and shifts, reads through pointer casts, and calls into third-party or system APIs. Standard library functions never count as third-party calls, even when the file gets their headers through another library's headers.
 - Guidance for explanatory comments: what to say for each kind of place, comments taken only from the code, headers and documentation, and open questions in the report for meanings that cannot be established. The report template has "Comments added" and "Open questions".
+- `verify` reports old comments that still mention a local or parameter the function no longer declares, which is what a rename leaves behind when it misses a comment.
 - `verify` reports new lines with UTF-8 text in a file that is not UTF-8, and `repair --encoding` converts them while the guard passes.
+
+### Fixed
+
+- `indent-style` no longer reports continuation lines of a parameter list or a call that are aligned with spaces in a file indented with tabs. It treated that common style as wrong and pushed agents to re-indent such lines.
 
 ### Security
 

@@ -139,6 +139,15 @@ def test_indent_style_follows_the_file():
     assert findings("void f(void)\n{\n    a = 1;\n\tb = 2;\n}\n", "indent-style") == []
 
 
+def test_indent_style_leaves_aligned_continuation_lines_alone():
+    tabbed = "\n".join(f"\tvalue{index} = {index};" for index in range(6))
+    code = (
+        "static int\nparse(const char *data,\n    size_t size)\n{\n"
+        f"{tabbed}\n\tcall(data,\n\t    size);\n    stray = 1;\n}}\n"
+    )
+    assert [finding.snippet for finding in findings(code, "indent-style")] == ["stray = 1;"]
+
+
 def test_magic_numbers_and_their_exemptions():
     code = body("x = a * 60;\nb = a << 4;\nint table[] = {3, 5, 7};\nreturn_code = -1;")
     assert [finding.snippet for finding in findings(code, "magic-number")] == ["60"]

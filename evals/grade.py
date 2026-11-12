@@ -57,6 +57,7 @@ def main() -> int:
         *names.unresolved_names(old, new, result.spans, known),
         *names.scope_issues(old, old_spans, new, result.spans),
         *names.frozen_issues(new, result.spans, frozen),
+        *names.stale_comment_issues(old, old_spans, new, result.spans),
     ]
     tiers, review = compare.compare(old, old_spans, new, result.spans)
     errors = [issue for issue in issues if issue.severity == ERROR]

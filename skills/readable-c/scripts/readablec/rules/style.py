@@ -194,13 +194,20 @@ def indent_style(context: RuleContext) -> None:
     if style not in ("tabs", "spaces"):
         return
     source = context.analysis.source
-    for line in conventions.code_line_starts(source, context.analysis.tokens):
-        start = source.line_start(line)
-        if not any(span_start <= start < span_end for span_start, span_end in context.spans):
-            continue
+    lines = [
+        line
+        for line in conventions.code_line_starts(source, context.analysis.tokens)
+        if any(start <= source.line_start(line) < end for start, end in context.spans)
+    ]
+    starts = [source.line_start(line) for line in lines]
+    contexts = lexer.contexts_at(source.data, context.analysis.tokens, starts)
+    for line, line_context in zip(lines, contexts, strict=True):
+        # A line that continues a parameter list or a call is aligned, not
+        # indented: files indented with tabs often align such lines with spaces.
+        is_continuation = line_context.parens > 0 or line_context.brackets > 0
         content = source.line_bytes(line)
         indent = conventions.leading_whitespace(content)
-        if not content.strip() or not indent:
+        if is_continuation or not content.strip() or not indent:
             continue
         wrong = indent.startswith(b" ") if style == "tabs" else b"\t" in indent
         if wrong:

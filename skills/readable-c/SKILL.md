@@ -10,7 +10,7 @@ description: >-
   long or deeply nested C function, cryptic names or magic numbers, or points at C functions or
   line numbers to tidy, even when they never say "refactor".
 metadata:
-  version: "0.1.0"
+  version: "0.2.0"
 ---
 
 # Readable C
@@ -64,7 +64,7 @@ The rules come from one idea: the reader should not have to work anything out th
 - `nested-ternary`, `unneeded-ternary`, `assignment-in-condition`, `mixed-operators`, `side-effects`: one idea per expression, with the grouping visible.
 - `magic-number`: name values that do not explain themselves.
 - `function-size`: extract parts with a responsibility of their own into static helpers. Do not add layers, wrappers or abstractions with a single use.
-- `needs-comment`: C that made sense to its author still stops a reader at allocations (who owns the block, why that size), bit operations (what the bits mean), casts that read memory as another type, raw `memcpy`/`memmove` offsets, and calls into third-party or system APIs (what they return on failure, who owns what they return). Add a short comment at each such place. Write only what the code, its headers or the library's documentation show; when you cannot establish a meaning, do not guess: list it under "Open questions" in the report. Comments explain why and what things mean, never what the code does step by step; delete comments that repeat the code and commented-out code.
+- `needs-comment`: C that made sense to its author still stops a reader at allocations (who owns the block, why that size), bit operations (what the bits mean), casts that read memory as another type, raw `memcpy`/`memmove` offsets, and calls into third-party or system APIs (what they return on failure, who owns what they return). Add a short comment at each such place. Write only what the code, its headers or the library's documentation show; when you cannot establish a meaning, do not guess: list it under "Open questions" in the report. Comments explain why and what things mean, never what the code does step by step; delete comments that repeat the code and commented-out code. When you rename something, update the comments that use the old name: `verify` lists the ones you missed.
 - `indent-style` and the conventions: new code looks like the code around it.
 - Keep using the project's own macros and idioms, such as an error-handling macro like `CHECK`, logging macros and asserts. They are the code base's conventions, so expanding one by hand needs a reason in the report.
 

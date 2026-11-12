@@ -68,6 +68,22 @@ def test_calls_into_a_system_library_need_a_comment_once_per_function():
     )
 
 
+def test_standard_functions_from_other_headers_are_not_library_calls():
+    # The file gets <string.h> and <stdlib.h> only through WinPR, as real code often does.
+    code = (
+        "#include <winpr/string.h>\n"
+        "int f(const WCHAR *wide, const char *text, size_t len)\n{\n"
+        "    char *copy = malloc(len + 1);\n"
+        "    memcpy(copy, text, len);\n"
+        "    if (strcmp(copy, text) == 0) free(copy);\n"
+        "    return ConvertFromUnicode(CP_UTF8, 0, wide, 16, &copy, 0, NULL, NULL);\n}\n"
+    )
+    assert needs_comment(code) == [
+        "malloc(len + 1)",
+        "ConvertFromUnicode(CP_UTF8, 0, wide, 16, &copy, 0, NULL, NULL)",
+    ]
+
+
 def test_calls_are_not_flagged_without_a_library_header():
     code = '#include <string.h>\n#include "local.h"\nint f(void)\n{\n    return helper(1) + (int)strlen("x");\n}\n'
     assert needs_comment(code) == []

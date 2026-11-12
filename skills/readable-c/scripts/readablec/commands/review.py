@@ -96,6 +96,7 @@ def verify(
     issues.extend(names.unresolved_names(old, new, new_spans, known))
     issues.extend(names.scope_issues(old, old_spans, new, new_spans))
     issues.extend(names.frozen_issues(new, new_spans, session.snapshot.frozen))
+    issues.extend(names.stale_comment_issues(old, old_spans, new, new_spans))
     results, equivalence_issues = compare.compare(old, old_spans, new, new_spans)
     issues.extend(equivalence_issues)
     findings, unchecked = _current_findings(session)
