@@ -14,6 +14,7 @@ from .common import (
     display_path,
     open_session,
     print_issue,
+    read_file,
     write_file,
 )
 
@@ -116,9 +117,39 @@ def restore(path: Path, whole_file: bool, as_json: bool) -> int:
     return EXIT_CLEAN
 
 
-def finish(path: Path, as_json: bool) -> int:
+def finish(path: Path, force: bool, as_json: bool) -> int:
     output = Output(as_json)
+    problem = None if force else _unchecked_changes(path)
+    if problem is not None:
+        output.line(f"finish: {problem}")
+        output.json({"removed": False, "reason": problem})
+        return EXIT_FINDINGS
     removed = state.delete(path)
     output.line("finish: the snapshot is removed." if removed else "finish: there was no snapshot.")
     output.json({"removed": removed})
     return EXIT_CLEAN
+
+
+def _unchecked_changes(path: Path) -> str | None:
+    """Why the snapshot must stay: the file holds changes that no `verify --final` checked.
+
+    The report is written from `verify --final`. An edit after it, even to a comment, can
+    make the report wrong, so `finish` waits for a final check of the file as it is."""
+    if not state.exists(path):
+        return None
+    try:
+        snapshot = state.load(path)
+    except state.StateError:
+        return None
+    current = read_file(path)
+    if current == snapshot.original or snapshot.final_digest == state.file_digest(current):
+        return None
+    if snapshot.final_digest is None:
+        return (
+            "`verify --final` has not run. Run it, write the report from its output, then run "
+            "`finish` again. To undo the refactor instead, run `restore`, then `finish`."
+        )
+    return (
+        "The file changed after the last `verify --final`. Run it again, write the report from "
+        "its output, then run `finish` again."
+    )

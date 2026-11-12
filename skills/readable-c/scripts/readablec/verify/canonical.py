@@ -137,7 +137,7 @@ class Canonicalizer:
         result: list[Canonical] = []
         for node in nodes:
             self._append(result, node)
-        return result
+        return _merge_repeated_guards(result)
 
     def _append(self, result: list[Canonical], node: Node) -> None:  # noqa: PLR0911  one return per statement kind
         if node.type == "comment":
@@ -596,11 +596,18 @@ class Canonicalizer:
         return tuple(parts)
 
 
+FLIPPED_LOGIC = {"&&": "||", "||": "&&"}
+
+
 def _negate(value: Canonical | None) -> Canonical:
+    """`!value`, with `!` pushed through `&&` and `||`. `!(a || b)` and `!a && !b` evaluate
+    `a` first and `b` only when needed, so they are one form."""
     if value is not None and len(value) == 2 and value[0] == "not":  # noqa: PLR2004  ("not", operand)
         return value[1]
     if value is not None and len(value) == 2 and value[0] == "bool":  # noqa: PLR2004  ("bool", operand)
         return ("not", value[1])
+    if value is not None and value[0] == "logic":
+        return _logic(FLIPPED_LOGIC[value[1]], [_negate(operand) for operand in value[2]])
     return ("not", value)
 
 
@@ -635,9 +642,19 @@ def _if(
     condition: Canonical | None, consequence: Canonical | None, alternative: Canonical | None
 ) -> Canonical:
     """An `if` in normal form: no empty branch before an `else`, no `if` nested in an `if`
-    without `else`."""
+    without `else`, and no `else if` that runs the same code as the branch before it."""
     if alternative is not None and _is_empty(consequence):
         return _if(_negate(condition), alternative, None)
+    repeats_branch = (
+        alternative is not None
+        and alternative[0] == "if"
+        and consequence is not None
+        and alternative[2] == consequence
+    )
+    if repeats_branch:
+        # `if (a) s; else if (b) s; else t;` tests b only when a fails, as `a || b` does.
+        assert alternative is not None, "checked above"
+        return _if(_logic("||", [condition, alternative[1]]), consequence, alternative[3])
     nests_plain_if = (
         alternative is None
         and consequence is not None
@@ -648,6 +665,44 @@ def _if(
         assert consequence is not None, "checked above"
         return ("if", _logic("&&", [condition, consequence[1]]), consequence[2], None)
     return ("if", condition, consequence, alternative)
+
+
+LEAVING_STATEMENTS = {"return", "break_statement", "continue_statement", "goto"}
+
+
+def _always_leaves(form: Canonical | None) -> bool:
+    if form is None:
+        return False
+    if form[0] in LEAVING_STATEMENTS:
+        return True
+    if form[0] == "block":
+        return bool(form[1]) and _always_leaves(form[1][-1])
+    if form[0] == "if":
+        return form[3] is not None and _always_leaves(form[2]) and _always_leaves(form[3])
+    return False
+
+
+def _merge_repeated_guards(items: list[Canonical]) -> list[Canonical]:
+    """`if (a) return -1; if (b) return -1;` is `if (a || b) return -1;`: when the first branch
+    runs it leaves, so the second test runs only when the first fails."""
+    merged: list[Canonical] = []
+    for item in items:
+        previous = merged[-1] if merged else None
+        repeats_guard = (
+            previous is not None
+            and previous[0] == "if"
+            and item[0] == "if"
+            and previous[3] is None
+            and item[3] is None
+            and previous[2] == item[2]
+            and _always_leaves(item[2])
+        )
+        if repeats_guard:
+            assert previous is not None, "checked above"
+            merged[-1] = ("if", _logic("||", [previous[1], item[1]]), item[2], None)
+        else:
+            merged.append(item)
+    return merged
 
 
 def _logic(operator: str, operands: list[Canonical | None]) -> Canonical:

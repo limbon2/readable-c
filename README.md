@@ -4,7 +4,7 @@ An agent skill that refactors hand-written C (not C++) into readable code withou
 
 The skill gives the agent:
 
-- a workflow: select regions, edit in small steps, verify after each step, report;
+- a workflow: select regions, edit in small steps, verify after each step, have a fresh subagent read the result and ask what it does not understand, report;
 - readability rules for C, each with a safe fix ([rules](skills/readable-c/references/rules.md));
 - the C pitfalls that change behavior during a refactor ([hazards](skills/readable-c/references/hazards.md));
 - `readable_c.py`, which proves that nothing outside the regions changed (CRLF line endings and CP1251 comments included), proves that mechanical refactors keep behavior, and lists what restructuring changed so the agent can explain it.
@@ -54,7 +54,7 @@ Lines 140-195 of net/packet.c, inside handle_packet, are a mess. Clean up just t
 Untangle load_config and apply_config in config.c.
 ```
 
-The agent selects the regions with `start`, edits in small steps, runs `verify` after each step and `check` for the findings left, and ends with a report: what changed, what was proven, what it could not prove and why, and the changes it proposes outside the regions.
+The agent selects the regions with `start`, edits in small steps, runs `verify` after each step and `check` for the findings left. Then a fresh subagent that has never seen the code reads it (`reader`) and lists the questions it would have to ask the author: what the code could say, and what only outside knowledge answers. The agent fixes every question of the first kind in the code, with a name, a comment or a named constant, and repeats the pass until a new reader finds none; questions of the second kind get a comment from a source the agent can read, or go to the report as open questions. The agent ends with a report: what changed, what was proven, what it could not prove and why, the reader's questions, and the changes it proposes outside the regions.
 
 For each function, `verify` reports a tier:
 
@@ -75,7 +75,7 @@ The rules and the verification discipline come from the Mannie project's `AGENTS
 | ESLint `no-nested-ternary`, `no-else-return`, `no-lonely-if`, `curly`, `no-unneeded-ternary`, `no-param-reassign` | `nested-ternary`, `else-after-return`, `lonely-if`, `missing-braces`, `unneeded-ternary`, `param-reassign` |
 | The custom ESLint rule `mannie/named-conditions` and its tests | `named-conditions`, with the same test cases in C |
 | Clippy's size lints | `function-size` |
-| "Comments explain what the code cannot" | `needs-comment`, which points at allocations, bit operations, memory casts and library calls without a comment, and the guidance for comments that are true |
+| "Comments explain what the code cannot" | `needs-comment`, which points at allocations, bit operations, memory casts, bounds and offsets, and library calls without a comment; `function-contract`; the guidance for comments that are true; the reader pass |
 | Narrow suppressions that state a reason | no markers in the user's code; every finding left gets a reason in the report |
 | "Improve the code you touch, do not reformat unrelated files" | regions and the guard |
 | "Never claim a check passed unless it ran" | the report template |
@@ -92,5 +92,7 @@ runs ruff, the format check, the package validator and the tests. Without Task: 
 
 ## Versions
 
+- **0.4.0** (2026-11-12): the required reader pass with a fresh subagent and the `reader` command; `needs-comment` and `function-size` become rules; bounds and offsets, `function-contract` and `hand-written-library`.
+- **0.3.0** (2026-11-12): `duplicate-branches`, and tier 1 proofs for joined branches and named joined conditions.
 - **0.2.0** (2026-11-12): comments for code that is hard to follow (`needs-comment`), stale-comment and encoding checks in `verify`, private snapshot folders, and an `indent-style` fix.
 - **0.1.0** (2026-11-11): first version. See [CHANGELOG.md](CHANGELOG.md).

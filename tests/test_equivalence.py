@@ -152,6 +152,42 @@ def test_choices_written_as_if_else_are_tier_1():
     assert tier(assigned, swapped) == 2
 
 
+CAP = "unsigned long f(int long_format, unsigned long rem)\n{{\n    unsigned long cap;\n{body}    return cap;\n}}\n"
+CAP_ORIGINAL = CAP.format(body="    cap = long_format ? rem : (rem < 32 ? rem : 32);\n")
+CAP_VERSIONS = {
+    "literal chain": "    if (long_format) {\n        cap = rem;\n    } else if (rem < 32) {\n        cap = rem;\n    } else {\n        cap = 32;\n    }\n",
+    "merged": "    if (long_format || rem < 32) {\n        cap = rem;\n    } else {\n        cap = 32;\n    }\n",
+    "named": "    int fits = long_format || rem < 32;\n    if (fits) {\n        cap = rem;\n    } else {\n        cap = 32;\n    }\n",
+    "named choice": "    int fits = long_format || rem < 32;\n    cap = fits ? rem : 32;\n",
+}
+
+
+@pytest.mark.parametrize("version", sorted(CAP_VERSIONS))
+def test_branches_with_the_same_body_merge_with_or(version):
+    assert tier(CAP_ORIGINAL, CAP.format(body=CAP_VERSIONS[version])) == 1
+
+
+def test_only_adjacent_branches_merge():
+    before = "int f(int a, int b, int c)\n{\n    int x = 0;\n    if (a) x = 1; else if (b) x = 2; else if (c) x = 1;\n    return x;\n}\n"
+    reordered = "int f(int a, int b, int c)\n{\n    int x = 0;\n    if (a || c) x = 1; else if (b) x = 2;\n    return x;\n}\n"
+    assert tier(before, reordered) == 2
+    different = before.replace("else if (c) x = 1;", "else x = 3;")
+    merged_wrongly = "int f(int a, int b, int c)\n{\n    int x = 0;\n    if (a || b) x = 1; else x = 3;\n    return x;\n}\n"
+    assert tier(different, merged_wrongly) == 2
+
+
+def test_repeated_guards_and_de_morgan_are_tier_1():
+    guards = "int f(const char *a, const char *b)\n{\n    if (!a) return -1;\n    if (!b) return -1;\n    return 0;\n}\n"
+    joined = (
+        "int f(const char *a, const char *b)\n{\n    if (!a || !b) return -1;\n    return 0;\n}\n"
+    )
+    negated = (
+        "int f(const char *a, const char *b)\n{\n    if (!(a && b)) return -1;\n    return 0;\n}\n"
+    )
+    assert tier(guards, joined) == 1
+    assert tier(guards, negated) == 1
+
+
 def test_compound_assignments_read_as_their_expansion():
     before = "void f(int *total, int n)\n{\n    int sum = 0;\n    sum = sum + n;\n    sum = sum * 2;\n    *total = sum;\n}\n"
     after = "void f(int *total, int n)\n{\n    int sum = 0;\n    sum += n;\n    sum *= 2;\n    *total = sum;\n}\n"

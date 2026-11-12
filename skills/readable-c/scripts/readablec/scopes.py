@@ -85,8 +85,12 @@ class FunctionScope:
         """True when the symbol is assigned, incremented or has its address taken."""
         return any(_modifies(use) for use in self.uses_of(symbol))
 
+    def is_assigned(self, symbol: Symbol) -> bool:
+        """True when the symbol is assigned or incremented; taking its address does not count."""
+        return any(_modifies(use, counting_address=False) for use in self.uses_of(symbol))
 
-def _modifies(use: Node) -> bool:
+
+def _modifies(use: Node, *, counting_address: bool = True) -> bool:
     child = use
     parent = use.parent
     while parent is not None and parent.type == "parenthesized_expression":
@@ -97,7 +101,8 @@ def _modifies(use: Node) -> bool:
         return parent.child_by_field_name("left") == child
     if parent.type == "update_expression":
         return True
-    return parent.type == "pointer_expression" and _operator(parent) == "&"
+    is_address = parent.type == "pointer_expression" and _operator(parent) == "&"
+    return counting_address and is_address
 
 
 def _operator(node: Node) -> str:

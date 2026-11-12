@@ -123,7 +123,7 @@ def on_lines(rule: Callable[[RuleContext], None]) -> Callable[[RuleContext], Non
 def run_rules(
     analysis: Analysis, spans: Sequence[Span], frozen_names: set[str] | None = None
 ) -> RuleReport:
-    from . import comments, conditions, control_flow, naming, style  # noqa: F401, PLC0415  importing registers the rules
+    from . import comments, conditions, control_flow, loops, naming, style  # noqa: F401, PLC0415  importing registers the rules
 
     context = RuleContext(
         analysis, [span for span in spans if span[0] < span[1]], frozen_names or set()

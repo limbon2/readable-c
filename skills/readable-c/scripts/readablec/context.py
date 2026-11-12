@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -20,6 +21,8 @@ Span = tuple[int, int]
 MAX_SHOWN_LINES = 15
 CONTROL_WORDS = {b"return", b"goto", b"break", b"continue"}
 ONE_LINE_KINDS = {"function", "prototype", "variable", "macro", "enum-constant"}
+TYPE_KINDS = {"struct", "union", "enum", "typedef"}
+_WORD = re.compile(r"[A-Za-z_]\w*")
 
 
 @dataclass
@@ -35,6 +38,13 @@ def region_context(
     analysis: Analysis, regions: Sequence[Region], known: KnownNames
 ) -> RegionContext:
     spans = [(region.start, region.end) for region in regions if not region.is_slot]
+    context = span_context(analysis, spans, known)
+    context.define_warnings = _defines_above_ranges(analysis, regions)
+    return context
+
+
+def span_context(analysis: Analysis, spans: Sequence[Span], known: KnownNames) -> RegionContext:
+    """The declarations, macros and header names that the code in the spans uses."""
     context = RegionContext()
     local_names = _local_names(analysis, spans)
     for name in sorted(_identifiers_in(analysis, spans)):
@@ -52,8 +62,23 @@ def region_context(
             context.from_headers[name] = known.origins.get(name, "a header")
         elif name not in local_names and name not in C_KEYWORDS:
             context.unknown.append(name)
-    context.define_warnings = _defines_above_ranges(analysis, regions)
+    _add_types_of_shown(analysis, spans, context)
     return context
+
+
+def _add_types_of_shown(analysis: Analysis, spans: Sequence[Span], context: RegionContext) -> None:
+    """Show the types that the shown declarations use, one level deep: `items` is a
+    `struct item` array, so a reader of `items[i].qty` needs `struct item` as well."""
+    shown = {name for name, _, _ in context.declarations}
+    for _, _, text in list(context.declarations):
+        for word in sorted(set(_WORD.findall(text)) - shown):
+            for declaration in analysis.declarations.by_name.get(word, []):
+                is_outside = not any(start <= declaration.start < end for start, end in spans)
+                if declaration.kind in TYPE_KINDS and is_outside and word not in shown:
+                    context.declarations.append(
+                        (word, declaration.kind, _shown(analysis, declaration))
+                    )
+                    shown.add(word)
 
 
 def _identifiers_in(analysis: Analysis, spans: Sequence[Span]) -> set[str]:

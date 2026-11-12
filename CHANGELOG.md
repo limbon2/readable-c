@@ -4,6 +4,37 @@ All notable changes to readable-c are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-12
+
+### Added
+
+- The reader pass: once the code is done, a fresh subagent that has never seen it reads it and lists the questions it would have to ask the author, in two lists: what the code could say, with the answer the reader worked out, and what only outside knowledge answers, including why the code does what it does. The agent writes every answer of the first kind down as a name, a comment or a named constant, and repeats the pass with a new subagent until a reader of the final code has none, up to three rounds. `verify --final` reports an error until a round has seen the final code or three rounds have run. A question of the second kind gets a comment from a source the agent can read, or goes to the report as an open question. The pass is required, and the skill must use a subagent when the harness can start one. The new `reader` command prints the brief for it: the current region code and the declarations it uses, never the original or the agent's notes. `references/reader.md` describes the pass and holds the brief for when the tool cannot run.
+- `needs-comment` reports bounds and offsets built from literal arithmetic, such as `2 * n + 1 < rem`, `buf[pos + 4]`, `pos += 36` and `pos = pos + 4 + n * 2 + 2`, when no comment says which fields add up to the number.
+- The `function-contract` rule asks for a comment above every function in a region that is longer than 10 lines: what it does, what it returns and on failure, who frees what.
+- The `hand-written-library` advice points at loops that only measure a string, or fill or copy an array, and suggests `strlen`, `strnlen`, `strcspn`, their `wcs` forms, `memset` or `memcpy`. It suggests a call only when the call does exactly what the loop does.
+
+### Changed
+
+- `needs-comment` is a rule instead of advice, and so are the length and nesting parts of `function-size`. A model that treated them as optional left allocations, bit tricks, offsets and long functions unexplained. More than 5 parameters stays advice, under the new name `many-parameters`, because a region task cannot change a signature that other code calls.
+- `finish` refuses while the file holds changes that no `verify --final` has checked. In a test run, a model edited comments after its final check and reported "0 rule findings" for a file that had 3. `finish --force` skips the check.
+- `start` and `reader` also show the types that the shown declarations use, such as `struct item` for `static struct item items[MAX_ITEMS];`.
+
+### Fixed
+
+- `verify` reported `const char *p; p = text;` as an assignment to a const variable, an error, although only the characters are const and the pointer may change. It fired on unchanged legacy code and told agents to fix code that compiles. Only variables that are const themselves count now (`const int n`, `char *const p`), taking the address of a const no longer counts as a write, and an error the original already had is not reported as new.
+
+## [0.3.0] - 2026-11-12
+
+### Added
+
+- The `duplicate-branches` rule reports an `else if` that runs the same code as the branch before it.
+- Tier 1 proves joining such neighboring branches with `||`, joining consecutive `if`s whose identical bodies always leave (`if (!a) return -1; if (!b) return -1;`), and pushing `!` through `&&` and `||`. A named condition for the joined test is proven too.
+- The `nested-ternary` guidance treats a branch-by-branch translation as a first step and shows how to join and name the result.
+
+### Changed
+
+- Before, `verify` proved a literal translation of a nested `?:` that kept two identical branches, but treated the cleaner merged form as restructuring. A model that followed the skill closely kept the duplicate. Both forms are tier 1 now, and `check` reports the duplicate.
+
 ## [0.2.0] - 2026-11-12
 
 ### Added

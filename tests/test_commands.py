@@ -3,6 +3,7 @@
 import json
 
 from conftest import FIXTURES
+from readablec.commands.reader import BRIEF
 
 
 def test_doctor_describes_the_file(run_cli, fixture_copy):
@@ -58,6 +59,8 @@ def test_a_full_refactor_session(run_cli, fixture_copy):
     checked = run_cli("check", str(path), "--json")
     assert json.loads(checked.out)["rule_findings"] == []
 
+    assert run_cli("reader", str(path)).code == 0
+    assert run_cli("verify", str(path), "--final").code == 0
     assert run_cli("finish", str(path)).code == 0
     assert "No refactor in progress" in run_cli("verify", str(path)).err
 
@@ -178,3 +181,118 @@ def test_fixtures_keep_their_bytes():
     legacy = (FIXTURES / "legacy.c").read_bytes()
     assert b"\r\n" in legacy
     assert "Комментарии".encode("cp1251") in legacy
+
+
+def test_reader_brief_shows_the_current_regions_and_is_tracked(run_cli, fixture_copy):
+    path = fixture_copy("inventory.c")
+    assert run_cli("start", str(path), "--function", "cnt", "--quiet").code == 0
+    not_yet = json.loads(run_cli("verify", str(path), "--json").out)["reader"]
+    assert not_yet.startswith("not run")
+
+    text = path.read_text()
+    path.write_text(
+        text.replace("int lo, int hi", "int lowest, int hi").replace("qty >= lo", "qty >= lowest"),
+        newline="",
+    )
+    brief = run_cli("reader", str(path))
+    assert brief.code == 0
+    assert brief.out.startswith("You are a C developer reading this code for the first time.")
+    assert "static int cnt(int lowest, int hi)" in brief.out
+    assert "int lo," not in brief.out, "the brief must not show the original code"
+    assert "- struct `item`:" in brief.out, "the type behind `items` is shown too"
+    assert "find_item" not in brief.out, "code outside the regions stays out"
+    current = json.loads(run_cli("verify", str(path), "--json").out)["reader"]
+    assert current.startswith("round 1 showed the current code")
+
+    path.write_text(
+        path.read_text().replace("int hi)", "int highest)").replace("<= hi", "<= highest"),
+        newline="",
+    )
+    changed = json.loads(run_cli("verify", str(path), "--json").out)["reader"]
+    assert changed.startswith("the code changed after the last of 1 briefs")
+    second = json.loads(run_cli("reader", str(path), "--json").out)
+    assert second["round"] == 2
+    assert (
+        "Reader pass: round 2 showed the current code"
+        in run_cli("verify", str(path), "--final").out
+    )
+
+
+def test_reader_guide_holds_the_same_brief_as_the_tool():
+    guide = (
+        FIXTURES.parent.parent / "skills" / "readable-c" / "references" / "reader.md"
+    ).read_text(encoding="utf-8")
+    assert BRIEF in guide
+
+
+def test_reader_brief_sorts_questions_into_two_lists():
+    assert "A. The code could say it" in BRIEF
+    assert "B. Only outside knowledge answers it" in BRIEF
+    assert "a comment that does not match what the code does" in BRIEF
+
+
+def test_final_verify_needs_a_reader_round_on_the_final_code(run_cli, fixture_copy):
+    path = fixture_copy("inventory.c")
+    assert run_cli("start", str(path), "--function", "cnt", "--quiet").code == 0
+    assert run_cli("verify", str(path)).code == 0, "only the final check needs the reader pass"
+    missing = run_cli("verify", str(path), "--final", "--json")
+    assert missing.code == 1
+    assert "The reader pass has not run" in json.loads(missing.out)["errors"][0]["message"]
+
+    assert run_cli("reader", str(path)).code == 0
+    assert run_cli("verify", str(path), "--final").code == 0
+
+    def rename(old: str, new: str) -> None:
+        text = path.read_text()
+        text = text.replace(f"int {old},", f"int {new},").replace(f">= {old} &&", f">= {new} &&")
+        path.write_text(text, newline="")
+
+    for old, new in (("lo", "low"), ("low", "lower")):
+        rename(old, new)
+        stale = run_cli("verify", str(path), "--final", "--json")
+        assert stale.code == 1
+        assert (
+            "changed after the last reader round" in json.loads(stale.out)["errors"][0]["message"]
+        )
+        assert run_cli("reader", str(path)).code == 0
+
+    rename("lower", "lowest")
+    after_three = run_cli("verify", str(path), "--final")
+    assert after_three.code == 0, "after three rounds the report says what no round checked"
+    assert "no round checked the last changes" in after_three.out
+
+
+def test_finish_waits_for_a_final_check_of_the_file_as_it_is(run_cli, fixture_copy):
+    path = fixture_copy("inventory.c")
+    assert run_cli("start", str(path), "--function", "cnt", "--quiet").code == 0
+    edited = path.read_text().replace(SPLIT_DECLARATION[0], SPLIT_DECLARATION[1])
+    path.write_text(edited, newline="")
+
+    unchecked = run_cli("finish", str(path))
+    assert unchecked.code == 1
+    assert "`verify --final` has not run" in unchecked.out
+
+    run_cli("verify", str(path), "--final")
+    path.write_text(edited.replace("/* Counts", "/* Counts all"), newline="")
+    changed = run_cli("finish", str(path))
+    assert changed.code == 1
+    assert "changed after the last `verify --final`" in changed.out
+
+    run_cli("verify", str(path), "--final")
+    assert run_cli("finish", str(path)).code == 0
+    assert "No refactor in progress" in run_cli("verify", str(path)).err
+
+
+def test_finish_after_restore_or_with_force(run_cli, fixture_copy):
+    path = fixture_copy("inventory.c")
+    assert run_cli("start", str(path), "--function", "cnt", "--quiet").code == 0
+    path.write_text(path.read_text().replace(*SPLIT_DECLARATION), newline="")
+    assert run_cli("restore", str(path)).code == 0
+    assert run_cli("finish", str(path)).code == 0, "nothing is left to check after restore"
+
+    assert run_cli("start", str(path), "--function", "cnt", "--quiet").code == 0
+    path.write_text(path.read_text().replace(*SPLIT_DECLARATION), newline="")
+    assert run_cli("finish", str(path), "--force").code == 0
+
+
+SPLIT_DECLARATION = ("int i, c = 0;", "int i;\n    int c = 0;")

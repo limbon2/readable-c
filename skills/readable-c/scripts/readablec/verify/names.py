@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from ..functions import FunctionSpan
     from ..includes import KnownNames
     from ..regions import Region
+    from ..scopes import Symbol
 
 Span = tuple[int, int]
 
@@ -155,9 +156,11 @@ def scope_issues(
                 )
         for symbol in scope.symbols:
             is_changed_constant = (
-                "const" in symbol.qualifiers and symbol.is_variable and scope.is_modified(symbol)
+                symbol.is_variable and _is_const_object(symbol) and scope.is_assigned(symbol)
             )
-            if is_changed_constant and _inside(symbol.declarator.start_byte, new_spans):
+            fact = ("const-write", name, symbol.name)
+            is_new = _inside(symbol.declarator.start_byte, new_spans) and fact not in old_facts
+            if is_changed_constant and is_new:
                 issues.append(
                     Issue(
                         "names",
@@ -188,7 +191,27 @@ def _scope_facts(analysis: Analysis, spans: Sequence[Span]) -> set[tuple[str, st
         facts.update(
             ("redeclared", function.name, syntax.text(node)) for node in scope.redeclarations
         )
+        facts.update(
+            ("const-write", function.name, symbol.name)
+            for symbol in scope.symbols
+            if symbol.is_variable and _is_const_object(symbol) and scope.is_assigned(symbol)
+        )
     return facts
+
+
+_DECLARATOR_PUNCTUATION = re.compile(r"[*\[\]()]")
+
+
+def _is_const_object(symbol: Symbol) -> bool:
+    """True when the variable itself is const: `const int n`, `char *const p`.
+
+    In `const char *p` the const belongs to the characters p points at, and p itself can
+    change. Qualifiers after the last `*` of the declarator belong to the variable."""
+    last_pointer = symbol.type_text.rfind("*")
+    if last_pointer < 0:
+        return "const" in symbol.qualifiers
+    own_qualifiers = _DECLARATOR_PUNCTUATION.split(symbol.type_text[last_pointer + 1 :])[0]
+    return "const" in own_qualifiers.split()
 
 
 def frozen_issues(

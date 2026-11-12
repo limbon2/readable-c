@@ -2,6 +2,6 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "readable-c",
   "description": "Refactor C into readable code, a whole file or part of one, and prove that nothing else changed.",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "keywords": ["c", "refactoring", "readability", "legacy-code", "tree-sitter"]
 }

@@ -91,6 +91,24 @@ if (total > 5000) {
 
 Keep the tests in the order the `?:` evaluates them, and `verify` proves the rewrite (tier 1). Reordering them, for example to test the largest value first, is a restructuring (tier 2): say why the order does not matter.
 
+A branch-by-branch translation is only the first step. Read the result again: when two branches do the same thing, join their conditions, and name the joined condition when it means something. `verify` proves the merge as well (tier 1).
+
+```c
+/* before */
+cap = long_format ? name_rem : (name_rem < 32 ? name_rem : 32);
+/* first step: two branches do the same thing (duplicate-branches) */
+if (long_format) {
+    cap = name_rem;
+} else if (name_rem < ASCII_NAME_LEN) {
+    cap = name_rem;
+} else {
+    cap = ASCII_NAME_LEN;
+}
+/* after: a long name may use the rest of the body; a short one fits in a fixed field */
+bool name_fits = long_format || name_rem < ASCII_NAME_LEN;
+cap = name_fits ? name_rem : ASCII_NAME_LEN;
+```
+
 ### unneeded-ternary (rule)
 
 A `?:` that only produces 1 or 0 hides a condition. The fix must keep the value:
@@ -161,6 +179,25 @@ if (n_items >= MAX_ITEMS) {
 ```
 
 Also after `break`, `continue` and `goto`. Moving the else body out one level widens the scope of its declarations; rename any that would clash with names after it. `verify` proves the change (tier 1).
+
+### duplicate-branches (rule)
+
+An `else if` that runs the same code as the branch before it makes the reader compare two bodies to find out they are equal:
+
+```c
+/* before */
+if (!ctx) {
+    return -1;
+} else if (!data) {
+    return -1;
+}
+/* after */
+if (!ctx || !data) {
+    return -1;
+}
+```
+
+Join only neighbors. Merging branches that have another branch between them changes which test runs first, so `verify` does not prove it. When the joined condition has a meaning of its own, name it.
 
 ### lonely-if (rule)
 
@@ -233,6 +270,26 @@ count++;
 
 Keep the order in which the original performs its changes. `*dst++ = *src++;` is the classic copy step and is exempt.
 
+### hand-written-library (advice)
+
+A loop that does what a standard function is named for makes the reader work out what the name would have told them:
+
+```c
+/* before */
+size_t n = 0;
+while (n < cap && name[n] != 0)
+    n++;
+/* after */
+size_t n = strnlen(name, cap);
+```
+
+`check` suggests a call only when it does exactly what the loop does: the counter starts at 0, the bound is a plain `<` or `!=`, and for the string functions the elements are `char` (with a cast for `unsigned char`, `uint8_t` and `BYTE`) or `wchar_t`. It covers `strlen`, `strnlen`, `strcspn` and their `wcs` forms, `memset` for a loop that stores 0, and `memcpy` for a loop that copies between two arrays of the same type.
+
+- `strnlen` and `wcsnlen` are POSIX.1-2008 and MSVC, not C89 or C99: use them when the code base already does or targets those platforms.
+- `WCHAR` is `wchar_t` on Windows but a 16-bit integer elsewhere (WinPR, FreeRDP), so a `WCHAR` loop keeps its shape; say what it measures in a comment instead.
+- A search with a bound (`while (i < n && buf[i] != ':') i++;`) is left alone: `memchr` returns NULL where the loop stops at `n`, so the code after the loop would change too.
+- Replacing a loop is a restructuring (tier 2): explain it in the report.
+
 ### stacked-casts (advice)
 
 `(int)(unsigned char)c` is right when the middle cast prevents sign extension; say so in a comment. Remove casts only when the types say they do nothing, which the tool cannot check.
@@ -260,15 +317,17 @@ strncpy(entry->name, name, LAST_NAME_INDEX);
 
 ## Functions and helpers
 
-### function-size (advice)
+### function-size (rule) and many-parameters (advice)
 
-Over 60 lines, nesting deeper than 3, or more than 5 parameters. Flatten nesting with early returns first. Then extract parts that have a responsibility of their own into static helpers:
+A function over 60 lines or nested deeper than 3 levels is a rule finding: fix it, or give the reason in the report. Flatten nesting with early returns first. Then extract parts that have a responsibility of their own into static helpers:
 
 - Name a helper for what it answers or does: `find_free_slot`, `is_valid_header`.
 - Put it in the helper slot before the function (for a line range) or before the function inside a function region. Make it `static`.
 - Pass what it needs as parameters. An array parameter becomes a pointer, so `sizeof` inside the helper changes; pass the length.
 - Code that uses a macro hiding `return` or `goto` stays in the caller.
 - Extracting is a restructuring (tier 2): `verify` lists the calls and writes that moved; explain them.
+
+More than 5 parameters is advice (`many-parameters`): code outside the region calls the function, so its signature cannot change in a region task. Propose a struct for parameters that travel together.
 
 Do not extract a helper that is used once and has no meaning of its own, do not add wrapper layers, and do not generalize for cases the code does not have.
 
@@ -278,11 +337,11 @@ Keep using the project's own macros and idioms: error-handling macros such as `C
 
 ## Comments
 
-A comment answers the question a reader would stop at, which the code cannot answer itself. C has many such places: memory that changes hands, bits packed into a word, bytes read as another type, calls into libraries with conventions of their own. Write a short comment at each of them, and nowhere else.
+A comment answers the question a reader would stop at, which the code cannot answer itself. C has many such places: memory that changes hands, bits packed into a word, bytes read as another type, sizes and offsets added up from a wire format, calls into libraries with conventions of their own. Write a short comment at each of them, and nowhere else.
 
-### needs-comment (advice)
+### needs-comment (rule)
 
-`check` points at these places when no comment sits on the same lines or on the two lines above:
+`check` points at these places when no comment sits on the same lines or on the two lines above. Each one gets a comment, a name that makes the comment unnecessary, or, when you cannot establish the meaning, an entry under "Open questions" in the report:
 
 | Kind | Flagged when | The comment says |
 | --- | --- | --- |
@@ -290,6 +349,7 @@ A comment answers the question a reader would stop at, which the code cannot ans
 | raw memory | `memcpy`, `memmove`, `memset`, `memcmp`, `strncpy`, `strncat` with computed offsets or sizes | what is copied or moved, and why the offsets and sizes are right |
 | bits | shifts and masks with literal numbers, and `&=`, `\|=`, `^=`, `<<=`, `>>=` with literals | what the bits mean: the field, the encoding or the trick |
 | reinterpreted memory | reading through a pointer cast: `*(T *)p`, `((T *)p)->x`, `((T *)p)[i]` | what the bytes are, and what the cast assumes about layout, byte order and alignment |
+| bounds and offsets | a comparison, an index or a position step built from arithmetic with a literal of 2 or more: `2 * n + 1 < rem`, `buf[pos + 4]`, `pos += 36`, `pos = pos + 4 + n * 2 + 2` | which fields the number adds up and their sizes; or build it from named sizes |
 | library calls | calls into a non-standard system or third-party header the file includes (`<windows.h>`, `<openssl/ssl.h>`) | what the call does here: its result on failure, who owns what it returns, its units |
 
 ```c
@@ -308,9 +368,24 @@ memmove(link->buf, link->buf + HDR_LEN + body_len, link->len - HDR_LEN - body_le
 
 /* Wait up to 500 ms; WAIT_TIMEOUT means the worker has not finished. */
 if (WaitForSingleObject(worker, 500) == WAIT_TIMEOUT) {
+
+/* Next record: the 6-byte header, the payload, then the 2-byte CRC. */
+pos = pos + RECORD_HEADER_LEN + payload_len + CRC_LEN;
 ```
 
-A name often says it better than a comment: `enum { CHANNEL_SHIFT = 4, CHANNEL_MASK = 0x0F };` inside the function (see `magic-number`). A comment changes no token and a named enum constant is proven by tier 1, so neither puts behavior at risk.
+A name often says it better than a comment: `enum { CHANNEL_SHIFT = 4, CHANNEL_MASK = 0x0F };` at the top of the function (see `magic-number`). A comment changes no token and a named enum constant is proven by tier 1, so neither puts behavior at risk. Keep the shape of the expression when you name its parts: for `pos = pos + 6 + payload_len + 2`, the named form `pos = pos + RECORD_HEADER_LEN + payload_len + CRC_LEN` reaches tier 1, while `pos += RECORD_HEADER_LEN + payload_len + CRC_LEN` groups the sum differently and only reaches tier 2.
+
+### function-contract (rule)
+
+A function in a region that is longer than 10 lines starts with a comment above it, so a reader learns what it is for before reading its body:
+
+```c
+/* Takes the oldest record off the queue. Returns 0, or -1 when the queue is empty;
+ * the caller frees rec->payload. */
+static int queue_pop(struct queue *q, struct record *rec)
+```
+
+Say what it does, what it returns (and what it returns on failure), and who frees memory it allocates or takes. One or two lines; write only what the code shows, and leave the step-by-step to the body.
 
 ### Only true comments
 
@@ -327,7 +402,7 @@ A wrong comment is worse than none, because the reader trusts it. Write only wha
 - Say why, or what something means. Never narrate what the code does step by step: `i++; /* increment i */` repeats the code, so delete such comments.
 - Use the file's comment style (`/* */` in a file without `//` comments) and the language of its other comments.
 - In a file that is not UTF-8 (`doctor` shows the encoding, for example cp1251), new non-ASCII text needs converting: `verify` reports it, and `repair --encoding cp1251` converts the new lines. Plain ASCII avoids the step.
-- Keep comments that carry information, such as license headers, author notes and the reasons for workarounds. Rewrite a comment that the refactor made wrong: after a rename, `verify` points at old comments that still use the old name, such as a header comment that says `cb->server` once the parameter is `slot`.
+- Keep comments that carry information, such as license headers, author notes and the reasons for workarounds. Rewrite a comment that the refactor made wrong: after a rename, `verify` points at old comments that still use the old name, such as a header comment that says `ctx->buf` once the parameter is `stream`.
 - `commented-out-code` (advice): delete disabled code, because version control keeps it. Ask first when the project has no version control.
 
 ## Layout
@@ -345,4 +420,5 @@ Work in small steps and run `verify` after each, so that each step reaches tier 
 3. Conditions and expressions.
 4. Constants.
 5. Helpers (tier 2: explain them).
-6. Comments for what is still not obvious (`needs-comment`), and open questions for what you could not establish.
+6. Comments for what is still not obvious (`needs-comment`, `function-contract`), and open questions for what you could not establish.
+7. The reader pass: a fresh subagent reads the result and asks what it does not understand (see SKILL.md and [reader.md](reader.md)).

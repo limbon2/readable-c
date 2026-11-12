@@ -147,15 +147,25 @@ def function_size(node: Node, context: RuleContext) -> None:
         problems.append(f"{lines} lines (over {MAX_FUNCTION_LINES})")
     if nesting > MAX_NESTING:
         problems.append(f"nesting depth {nesting} (over {MAX_NESTING})")
-    if parameters > MAX_PARAMETERS:
-        problems.append(f"{parameters} parameters (over {MAX_PARAMETERS})")
     if problems:
         context.report(
             "function-size",
+            RULE,
+            name,
+            f"`{span.name}` has {', '.join(problems)}. Extract the parts that have a responsibility "
+            "of their own into static helpers with names that say what they do, and flatten "
+            "nesting with early returns.",
+        )
+    if parameters > MAX_PARAMETERS:
+        # A signature that code outside the region calls cannot change inside the region,
+        # so this one stays a judgment call.
+        context.report(
+            "many-parameters",
             ADVICE,
             name,
-            f"`{span.name}` has {', '.join(problems)}. Extract parts with a responsibility of their "
-            "own into static helpers, and flatten nesting with early returns.",
+            f"`{span.name}` takes {parameters} parameters (over {MAX_PARAMETERS}). If callers pass "
+            "related values together, a struct would name them; propose it when the function is "
+            "used outside the region.",
         )
 
 

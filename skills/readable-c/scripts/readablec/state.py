@@ -48,6 +48,10 @@ class Snapshot:
     baseline: list[dict[str, object]] = field(default_factory=list)
     frozen: list[dict[str, object]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # Digests of the region text that `reader` wrote a brief for, oldest first.
+    reader_briefs: list[str] = field(default_factory=list)
+    # Digest of the whole file at the last `verify --final`, which `finish` compares.
+    final_digest: str | None = None
 
 
 def state_dir() -> Path:
@@ -124,6 +128,11 @@ def _read_private(source: Path) -> bytes:
         return file.read()
 
 
+def file_digest(data: bytes) -> str:
+    """Names the exact bytes of a file, so a later command can tell whether it changed."""
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
 def exists(path: Path) -> bool:
     metadata, _ = _paths(path)
     return os.path.lexists(metadata)
@@ -140,6 +149,8 @@ def save(snapshot: Snapshot) -> Path:
         "baseline": snapshot.baseline,
         "frozen": snapshot.frozen,
         "notes": snapshot.notes,
+        "reader_briefs": snapshot.reader_briefs,
+        "final_digest": snapshot.final_digest,
     }
     _write_private(original_path, snapshot.original)
     _write_private(metadata_path, json.dumps(metadata, indent=2).encode("utf-8"))
@@ -177,6 +188,8 @@ def load(path: Path) -> Snapshot:
         baseline=metadata.get("baseline", []),
         frozen=metadata.get("frozen", []),
         notes=metadata.get("notes", []),
+        reader_briefs=metadata.get("reader_briefs", []),
+        final_digest=metadata.get("final_digest"),
     )
 
 

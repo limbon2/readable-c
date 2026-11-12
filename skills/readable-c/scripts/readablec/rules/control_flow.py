@@ -1,15 +1,48 @@
-"""Rules about the shape of control flow: else after a jump, braces, indentation, goto."""
+"""Rules about the shape of control flow: else after a jump, repeated branches, braces,
+indentation, goto."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .. import ctree, syntax
+from .. import ctree, lexer, syntax
 from ..findings import ADVICE, RULE
 from .engine import RuleContext, on
 
 if TYPE_CHECKING:
     from tree_sitter import Node
+
+
+def _body_tokens(context: RuleContext, body: Node) -> list[tuple[str, bytes]]:
+    """The body's tokens without comments, layout and its own braces."""
+    tokens = lexer.significant(
+        lexer.tokens_between(context.analysis.tokens, body.start_byte, body.end_byte)
+    )
+    if body.type == "compound_statement" and len(tokens) >= 2:  # noqa: PLR2004  the braces
+        return tokens[1:-1]
+    return tokens
+
+
+@on("if_statement")
+def duplicate_branches(node: Node, context: RuleContext) -> None:
+    alternative = ctree.else_statement(node)
+    if alternative is None or alternative.type != "if_statement":
+        return
+    first = node.child_by_field_name("consequence")
+    second = alternative.child_by_field_name("consequence")
+    if first is None or second is None:
+        return
+    first_tokens = _body_tokens(context, first)
+    if first_tokens and first_tokens == _body_tokens(context, second):
+        context.report(
+            "duplicate-branches",
+            RULE,
+            alternative.child_by_field_name("condition") or alternative,
+            "This `else if` runs the same code as the branch before it. Join the two conditions "
+            "with `||` in one branch, and name the joined condition when it means something "
+            "(`bool name_fits = long_format || name_rem < ASCII_NAME_LEN;`). `verify` proves "
+            "the merge.",
+        )
 
 
 @on("if_statement")

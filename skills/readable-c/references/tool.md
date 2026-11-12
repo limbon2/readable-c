@@ -77,12 +77,17 @@ Runs the guard, then:
 | an old comment that still mentions a local or parameter the function no longer declares (a missed rename) | review |
 | an object-like `#define` added or removed | review |
 | tier 2 inventory differences | review |
+| with `--final`: no reader round has seen the final code, and fewer than three rounds ran | error |
 
-Then it prints the equivalence tier of each function and a summary of the findings. `--diff` adds a unified diff of each region; `--final` adds the data for the report. Exits 1 when there is an error.
+Then it prints the equivalence tier of each function and a summary of the findings. `--diff` adds a unified diff of each region; `--final` adds the data for the report, including whether a reader brief showed the code as it is now. Exits 1 when there is an error.
 
 ### format FILE
 
 Needs a `.clang-format` (or `_clang-format`) in the file's folder or above. The tool formats the whole file in memory with the project's style, with the options that change tokens turned off (`InsertBraces`, `RemoveParentheses`, `RemoveSemicolon`, `QualifierAlignment`, `SortIncludes`, `ReflowComments`, `IntegerLiteralSeparator`), applies only the replacements inside the regions, and refuses the result if any token changed. Without a `.clang-format` it does nothing and says so.
+
+### reader FILE
+
+Prints the brief for the reader pass: instructions for a first-time reader, the current text of the regions with line numbers, the declarations from the same file that the code uses (and the types those declarations use), and the names that come from headers. It leaves out the original code and the findings. Give the output to a fresh subagent; see [reader.md](reader.md). Each brief records a digest of the region text, which `verify --final` compares with the code as it is now.
 
 ### repair FILE [--encoding CODEC]
 
@@ -92,9 +97,9 @@ For a guard failure caused by line endings, BOM, trailing white space, the final
 
 Puts the original text back into the regions. `--whole-file` writes back the whole file as it was at `start`.
 
-### finish FILE
+### finish FILE [--force]
 
-Deletes the snapshot.
+Deletes the snapshot. It refuses (exit 1) while the file holds changes that no `verify --final` has checked: when `verify --final` never ran, or the file changed after the last one, even in a comment. The report is written from `verify --final`, so a later edit can make it wrong. A file that `restore` put back passes. `--force` deletes the snapshot without the check; use it only when the user asks to stop.
 
 ## Output
 
@@ -115,6 +120,7 @@ inventory.c:51: error: [names] `totl` is not declared in the region, ...
 - Tier 1 compares canonical syntax trees. The canonical form:
   - replaces each local and parameter by its order of first use and its type, so renames match and captures do not;
   - drops comments, layout, redundant parentheses (except inside call arguments and `sizeof`), braces around single statements, plain nested blocks, `else` after a branch that always leaves, and `else { if }`;
+  - joins an `else if` whose body repeats the branch before it, and consecutive `if`s whose identical bodies always leave, into one condition with `||`; pushes `!` through `&&` and `||`;
   - merges nested `if`s without `else` into one `if` with `&&`, and flattens `&&` and `||` chains;
   - in a loop body, reads `if (c) { x; continue; } rest` as `if (c) { x } else { rest }`;
   - reads a `for` loop whose body has no `continue` of its own as `init; while (test) { body step }`;

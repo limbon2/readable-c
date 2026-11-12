@@ -87,3 +87,46 @@ def test_standard_functions_from_other_headers_are_not_library_calls():
 def test_calls_are_not_flagged_without_a_library_header():
     code = '#include <string.h>\n#include "local.h"\nint f(void)\n{\n    return helper(1) + (int)strlen("x");\n}\n'
     assert needs_comment(code) == []
+
+
+def test_needs_comment_is_a_rule():
+    [finding] = findings(body("    s = realloc(s, 64);"), "needs-comment")
+    assert finding.severity == "rule"
+
+
+def test_bounds_and_offsets_built_from_literals_need_a_comment():
+    assert needs_comment(body("    if (2 * count + 1 < 64) return;")) == ["2 * count + 1 < 64"]
+    assert needs_comment(body("    s[0] = buf[count + 2];")) == ["buf[count + 2]"]
+    assert needs_comment(body("    count += 36;")) == ["count += 36"]
+    assert needs_comment(body("    count = count + 4 + count * 2 + 2;")) == [
+        "count = count + 4 + count * 2 + 2"
+    ]
+
+
+def test_bounds_with_names_small_steps_or_a_comment_are_fine():
+    named = "enum { HEADER_LEN = 8 };\n"
+    assert needs_comment(body("    if (count + HEADER_LEN < 64) return;", named)) == []
+    assert needs_comment(body("    if (count + 1 < 64) return;")) == []
+    assert needs_comment(body("    count += 1;")) == []
+    assert needs_comment(body("    count = buf[count - 1];")) == []
+    explained = "    /* the 4-byte id, then the name */\n    count += 36;"
+    assert needs_comment(body(explained)) == []
+
+
+def test_a_long_function_needs_a_contract_comment_above_it():
+    statements = "\n".join(f"    count = count + {index};" for index in range(12))
+    code = body(statements)
+    [finding] = findings(code, "function-contract")
+    assert finding.severity == "rule"
+    assert "`f`" in finding.message
+    assert findings("/* Adds up the counts. */\n" + code, "function-contract") == []
+    assert findings(body("    count = 1;"), "function-contract") == []
+
+
+def test_the_contract_of_a_void_function_does_not_ask_for_a_result():
+    statements = "\n".join(f"    count = count + {index};" for index in range(12))
+    [void_finding] = findings(body(statements), "function-contract")
+    assert "what it returns" not in void_finding.message
+    returning = f"int g(int count)\n{{\n{statements}\n    return count;\n}}\n"
+    [int_finding] = findings(returning, "function-contract")
+    assert "what it returns" in int_finding.message

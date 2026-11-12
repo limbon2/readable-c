@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 import difflib
 from collections.abc import Sequence
 from pathlib import Path
 
-from .. import guard, includes
+from .. import guard, includes, state
 from ..findings import RULE, Finding, mark_new
 from ..issues import ERROR, REVIEW, Issue
 from ..rules import run_rules
@@ -23,7 +24,7 @@ from .common import (
 )
 
 
-def _guard_failed(output: Output, path: Path, session: Session) -> int:
+def guard_failed(output: Output, path: Path, session: Session) -> int:
     output.section("Guard: failed")
     for issue in session.result.issues:
         print_issue(output, path, issue)
@@ -45,7 +46,7 @@ def check(path: Path, as_json: bool) -> int:
     output = Output(as_json)
     session = open_session(path)
     if session.result.spans is None:
-        return _guard_failed(output, path, session)
+        return guard_failed(output, path, session)
     findings, unchecked = _current_findings(session)
     rules = [(finding, is_new) for finding, is_new in findings if finding.severity == RULE]
     advice = [(finding, is_new) for finding, is_new in findings if finding.severity != RULE]
@@ -79,7 +80,7 @@ def verify(
     output = Output(as_json)
     session = open_session(path)
     if session.result.spans is None:
-        return _guard_failed(output, path, session)
+        return guard_failed(output, path, session)
     old = session.original_analysis()
     new = session.current_analysis()
     old_spans = [(region.start, region.end) for region in session.regions]
@@ -99,6 +100,9 @@ def verify(
     issues.extend(names.stale_comment_issues(old, old_spans, new, new_spans))
     results, equivalence_issues = compare.compare(old, old_spans, new, new_spans)
     issues.extend(equivalence_issues)
+    reader_issue = reader_gate_issue(session) if final else None
+    if reader_issue is not None:
+        issues.append(reader_issue)
     findings, unchecked = _current_findings(session)
     errors = [issue for issue in issues if issue.severity == ERROR]
     review_items = [issue for issue in issues if issue.severity == REVIEW]
@@ -128,6 +132,11 @@ def verify(
     if show_diff:
         _print_diff(output, session)
     if final:
+        state.save(
+            dataclasses.replace(
+                session.snapshot, path=path, final_digest=state.file_digest(session.current)
+            )
+        )
         _print_report_data(
             output,
             path,
@@ -147,6 +156,7 @@ def verify(
             "new_rule_findings": new_rule_count,
             "advice": advice_count,
             "unchecked": unchecked,
+            "reader": reader_status(session),
         }
     )
     return EXIT_FINDINGS if errors else EXIT_CLEAN
@@ -194,4 +204,53 @@ def _print_report_data(
     output.line(f"Proven equivalent (tier 0 or 1): {', '.join(proven) or 'none'}")
     output.line(f"Not proven (tier 2, explain): {', '.join(unproven) or 'none'}")
     output.line(f"Rule findings left: {rule_count} (give a reason for each)")
+    output.line(f"Reader pass: {reader_status(session)}")
     output.line("Not run: compilation and tests (this tool works without a build).")
+
+
+MAX_READER_ROUNDS = 3
+
+
+def _current_digest(session: Session) -> str:
+    from .reader import region_digest  # noqa: PLC0415  reader imports this module
+
+    spans = [span for span in session.spans if span[0] < span[1]]
+    return region_digest(session.current, spans)
+
+
+def reader_status(session: Session) -> str:
+    """Whether a reader brief showed the code as it is now, and in which round."""
+    briefs = session.snapshot.reader_briefs
+    digest = _current_digest(session)
+    if digest in briefs:
+        return f"round {briefs.index(digest) + 1} showed the current code ({len(briefs)} briefs in all)"
+    if len(briefs) >= MAX_READER_ROUNDS:
+        return (
+            f"the code changed after the last of {len(briefs)} rounds: say in the report that no "
+            "round checked the last changes"
+        )
+    if briefs:
+        return (
+            f"the code changed after the last of {len(briefs)} briefs: run `reader` again and give it "
+            "to a fresh subagent"
+        )
+    return "not run: run `reader` and give it to a fresh subagent (required, see SKILL.md)"
+
+
+def reader_gate_issue(session: Session) -> Issue | None:
+    """The final check needs a reader round that saw the final code, unless three rounds ran."""
+    briefs = session.snapshot.reader_briefs
+    if _current_digest(session) in briefs or len(briefs) >= MAX_READER_ROUNDS:
+        return None
+    if briefs:
+        message = (
+            f"The code changed after the last reader round ({len(briefs)} so far). Run `reader` "
+            "again and give it to a new subagent: the pass is done when a round that sees the "
+            f"final code returns an empty list A, or after {MAX_READER_ROUNDS} rounds."
+        )
+    else:
+        message = (
+            "The reader pass has not run. Run `reader` and give it to a fresh subagent, as "
+            "SKILL.md describes; the final check needs it."
+        )
+    return Issue("reader", ERROR, message, None)

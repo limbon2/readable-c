@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import __version__
-from .commands import edit, inspect, review, start
+from .commands import edit, inspect, reader, review, start
 from .commands.common import EXIT_USAGE, CommandError, configure_console
 from .syntax import MissingDependencyError
 
@@ -18,8 +18,9 @@ Refactor C into readable code, one region of a file at a time.
 
 Workflow: doctor FILE, then start FILE --function NAME (or --lines A-B), edit,
 verify FILE after each step, check FILE for the findings left, format FILE,
-verify FILE --final, finish FILE. restore FILE undoes the regions; repair FILE
-fixes line endings or encoding that an edit tool changed outside the regions.
+reader FILE for a fresh subagent to read, verify FILE --final, finish FILE.
+restore FILE undoes the regions; repair FILE fixes line endings or encoding that
+an edit tool changed outside the regions.
 """
 
 _LINE_RANGE = re.compile(r"^(\d+)(?:-(\d+))?$")
@@ -112,6 +113,12 @@ def _parser() -> argparse.ArgumentParser:
 
     command("format", "apply the project's .clang-format inside the regions only")
 
+    command(
+        "reader",
+        "print a brief for a first-time reader of the regions as they are now; a fresh subagent "
+        "answers it with the questions the code leaves open",
+    )
+
     repair = command(
         "repair", "restore frozen bytes after an edit tool changed line endings or encoding"
     )
@@ -124,7 +131,12 @@ def _parser() -> argparse.ArgumentParser:
         "--whole-file", action="store_true", help="write back the whole file as it was at start"
     )
 
-    command("finish", "forget the snapshot once the refactor is done")
+    finish = command(
+        "finish",
+        "forget the snapshot once the refactor is done; refuses when the file changed after the "
+        "last verify --final",
+    )
+    finish.add_argument("--force", action="store_true", help="drop the snapshot without that check")
     return parser
 
 
@@ -168,8 +180,10 @@ def _dispatch(arguments: argparse.Namespace) -> int:  # noqa: PLR0911  one retur
         )
     if name == "format":
         return edit.format_regions(arguments.file, as_json)
+    if name == "reader":
+        return reader.reader(arguments.file, as_json)
     if name == "repair":
         return edit.repair(arguments.file, arguments.encoding, as_json)
     if name == "restore":
         return edit.restore(arguments.file, arguments.whole_file, as_json)
-    return edit.finish(arguments.file, as_json)
+    return edit.finish(arguments.file, arguments.force, as_json)

@@ -5,8 +5,12 @@ size or owner is not obvious, a shift by a literal into a literal mask, a cast
 that reads memory as another type, a call into a library the file does not
 define. A comment next to such code answers the question the reader would ask.
 The rule reports these places when no comment sits on the same lines or on the
-two lines above; it is advice, because only a person can tell whether the code
-already says enough.
+two lines above. It is a rule, so inside a region every such place gets a comment,
+a name that explains it, or a reason in the report.
+
+The same rules require a one-line contract above every function in a region that
+is longer than a few lines (function-contract), so a reader learns what it does,
+what it returns and who frees what before reading its body.
 """
 
 from __future__ import annotations
@@ -14,13 +18,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .. import ctree, stdlib, syntax
-from ..findings import ADVICE
-from .engine import RuleContext, on
+from ..findings import RULE
+from .engine import RuleContext, on, on_function
 
 if TYPE_CHECKING:
     from tree_sitter import Node
 
-RULE = "needs-comment"
+RULE_ID = "needs-comment"
 LINES_ABOVE = 2
 
 ALWAYS_EXPLAINED = {"realloc", "reallocarray"}
@@ -69,9 +73,9 @@ def _is_explained(context: RuleContext, node: Node) -> bool:
 
 def _report_once(context: RuleContext, node: Node, message: str) -> None:
     statement = _statement_of(node)
-    is_new = context.first_time(RULE, statement.start_byte, statement.end_byte)
+    is_new = context.first_time(RULE_ID, statement.start_byte, statement.end_byte)
     if is_new and not _is_explained(context, node):
-        context.report(RULE, ADVICE, node, message)
+        context.report(RULE_ID, RULE, node, message)
 
 
 def _callee(node: Node) -> str:
@@ -176,6 +180,118 @@ def bit_assignment_needs_comment(node: Node, context: RuleContext) -> None:
         _report_once(context, node, _bits_message())
 
 
+OFFSET_ARITHMETIC = {"+", "-", "*", "/"}
+MIN_UNEXPLAINED_LITERAL = 2
+
+
+def _literal_value(node: Node) -> int | None:
+    current = syntax.unwrap_parentheses(node)
+    if current.type != "number_literal":
+        return None
+    spelling = syntax.text(current).rstrip("uUlL")
+    try:
+        return int(spelling, 16 if spelling.lower().startswith("0x") else 10)
+    except ValueError:
+        return None
+
+
+def _literal_arithmetic(node: Node) -> bool:
+    """True when the expression adds, subtracts, multiplies or divides by a literal of 2 or
+    more: `2 * len + 1`, `pos + 4`. Adding or subtracting 1 reads as obvious and is left alone."""
+    for child in syntax.walk(node):
+        is_arithmetic = (
+            child.type == "binary_expression" and ctree.operator(child) in OFFSET_ARITHMETIC
+        )
+        if not is_arithmetic:
+            continue
+        for side in ("left", "right"):
+            operand = child.child_by_field_name(side)
+            value = _literal_value(operand) if operand is not None else None
+            if value is not None and value >= MIN_UNEXPLAINED_LITERAL:
+                return True
+    return False
+
+
+def _bounds_message() -> str:
+    return (
+        "Say what this bound or offset is made of, which fields it adds up and their sizes, or "
+        "build it from named sizes such as `pos + ENTRY_HEADER_LEN` or `sizeof(WCHAR)`, so a "
+        "reader does not have to work out the numbers."
+    )
+
+
+@on("binary_expression")
+def bound_needs_comment(node: Node, context: RuleContext) -> None:
+    is_comparison = ctree.operator(node) in ctree.COMPARISONS
+    if not is_comparison or syntax.enclosing(node, NAMED_ELSEWHERE) is not None:
+        return
+    operands = [node.child_by_field_name(side) for side in ("left", "right")]
+    if any(operand is not None and _literal_arithmetic(operand) for operand in operands):
+        _report_once(context, node, _bounds_message())
+
+
+@on("subscript_expression")
+def index_needs_comment(node: Node, context: RuleContext) -> None:
+    index = node.child_by_field_name("index")
+    if index is not None and _literal_arithmetic(index):
+        _report_once(context, node, _bounds_message())
+
+
+@on("assignment_expression")
+def offset_needs_comment(node: Node, context: RuleContext) -> None:
+    """A position advanced by a literal: `pos += 36`, `pos = pos + 4 + len * 2 + 2`."""
+    target = node.child_by_field_name("left")
+    value = node.child_by_field_name("right")
+    if target is None or value is None:
+        return
+    operator = ctree.operator(node)
+    steps_by_literal = operator in ("+=", "-=") and (
+        (_literal_value(value) or 0) >= MIN_UNEXPLAINED_LITERAL or _literal_arithmetic(value)
+    )
+    target_text = syntax.text(syntax.unwrap_parentheses(target))
+    advances_itself = (
+        operator == "="
+        and _literal_arithmetic(value)
+        and any(syntax.text(child) == target_text for child in syntax.walk(value))
+    )
+    if steps_by_literal or advances_itself:
+        _report_once(context, node, _bounds_message())
+
+
+CONTRACT_MIN_LINES = 10
+
+
+@on_function
+def function_contract(node: Node, context: RuleContext) -> None:
+    span = context.function
+    if span is None:
+        return
+    owns_header = any(start <= span.definition_start < end for start, end in context.spans)
+    lines = syntax.end_line(node) - syntax.start_line(node) + 1
+    has_comment_above = span.first_line < context.analysis.source.line_of(span.definition_start)
+    if not owns_header or has_comment_above or lines <= CONTRACT_MIN_LINES:
+        return
+    declarator = node.child_by_field_name("declarator")
+    return_type = node.child_by_field_name("type")
+    returns_nothing = (
+        return_type is not None
+        and syntax.text(return_type) == "void"
+        and declarator is not None
+        and declarator.type == "function_declarator"
+    )
+    result = (
+        "what it changes" if returns_nothing else "what it returns (and what it returns on failure)"
+    )
+    context.report(
+        "function-contract",
+        RULE,
+        declarator or node,
+        f"Add a short comment above `{span.name}`: what it does, {result}, and who frees memory "
+        "it allocates or takes. Write only what the code shows, and say nothing that does not "
+        "apply.",
+    )
+
+
 def _is_pointer_cast(node: Node | None) -> bool:
     if node is None:
         return False
@@ -219,14 +335,14 @@ def library_call_needs_comment(node: Node, context: RuleContext) -> None:
     if not from_elsewhere or not known.unknown_system_headers:
         return
     if not context.first_time(
-        RULE, "call", context.function.name if context.function else "", name
+        RULE_ID, "call", context.function.name if context.function else "", name
     ):
         return
     headers = ", ".join(f"<{header}>" for header in known.unknown_system_headers)
     if not _is_explained(context, node):
         context.report(
+            RULE_ID,
             RULE,
-            ADVICE,
             node,
             f"`{name}` comes from outside this file, probably from {headers}. Unless its name says "
             "it all, say what it does here: what it returns on failure, who owns what it returns, "

@@ -90,6 +90,19 @@ def test_else_after_return_break_continue_and_goto():
     assert count(body("if (a) { b = 1; } else { b = 2; }"), "else-after-return") == 0
 
 
+def test_duplicate_branches():
+    repeated = "if (a) {\n    b = a;\n} else if (b < 32) {\n    b = a;\n} else {\n    b = 32;\n}"
+    unbraced = "if (a) b = a; else if (b < 32) { b = a; /* fits */ } else b = 32;"
+    different = "if (a) { b = a; } else if (b < 32) { b = 1; } else { b = 32; }"
+    separate_guards = "if (!a) return; if (!b) return;"
+    assert [finding.snippet for finding in findings(body(repeated), "duplicate-branches")] == [
+        "(b < 32)"
+    ]
+    assert count(body(unbraced), "duplicate-branches") == 1
+    assert count(body(different), "duplicate-branches") == 0
+    assert count(body(separate_guards), "duplicate-branches") == 0
+
+
 def test_lonely_if():
     assert count(body("if (a) { b = 1; } else { if (b) { a = 1; } }"), "lonely-if") == 1
     assert count(body("if (a) { b = 1; } else if (b) { a = 1; }"), "lonely-if") == 0
@@ -178,8 +191,18 @@ def test_commented_out_code():
 
 def test_function_size():
     long_body = "\n".join(f"    a = {index};" for index in range(70))
-    assert count(body(long_body), "function-size") == 1
+    [finding] = findings(body(long_body), "function-size")
+    assert finding.severity == "rule"
     assert count(body("a = 1;"), "function-size") == 0
+    nested = "if (a) { if (b) { while (a) { if (b) { a = 1; } } } }"
+    assert "nesting depth 4" in findings(body(nested), "function-size")[0].message
+
+
+def test_many_parameters_is_advice_on_its_own():
+    code = "void f(int a, int b, int c, int d, int e, int g)\n{\n    a = 1;\n}\n"
+    assert count(code, "function-size") == 0
+    [finding] = findings(code, "many-parameters")
+    assert finding.severity == "advice"
 
 
 def test_code_inside_parse_errors_is_reported_as_not_checked():
