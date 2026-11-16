@@ -9,11 +9,13 @@ are reported too, because a rename that misses a comment leaves it wrong.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from .. import dialect, lexer, stdlib, syntax
+from .. import dialect, includes, lexer, stdlib, syntax
 from ..issues import ERROR, REVIEW, Issue
+from ..standard import C23
 from ..stdlib import C_KEYWORDS
 
 if TYPE_CHECKING:
@@ -24,6 +26,7 @@ if TYPE_CHECKING:
     from ..includes import KnownNames
     from ..regions import Region
     from ..scopes import Symbol
+    from ..standard import CStandard
 
 Span = tuple[int, int]
 
@@ -68,11 +71,18 @@ def external_names(analysis: Analysis) -> set[str]:
 
 
 def unresolved_names(
-    old: Analysis, new: Analysis, new_spans: Sequence[Span], known: KnownNames
+    old: Analysis,
+    new: Analysis,
+    new_spans: Sequence[Span],
+    known: KnownNames,
+    *,
+    target: CStandard | None = None,
 ) -> list[Issue]:
     allowed = (
         new.file_scope_names | external_names(old) | known.names | stdlib.ALWAYS_KNOWN | C_KEYWORDS
     )
+    if target is not None and target.year >= C23:
+        allowed.add("static_assert")
     reported: set[str] = set()
     issues = []
     for name, line in _external_uses(new, new_spans):
@@ -403,7 +413,24 @@ def _mentions(text: str, name: str) -> bool:
     return re.search(as_code, text) is not None
 
 
-def dialect_issues(old: Analysis, new: Analysis, new_spans: Sequence[Span]) -> list[Issue]:
+def dialect_issues(
+    old: Analysis,
+    new: Analysis,
+    new_spans: Sequence[Span],
+    target: CStandard | None = None,
+    *,
+    known: KnownNames | None = None,
+) -> list[Issue]:
+    if target is not None:
+        if known is None:
+            known = includes.known_names(new.source.path, new.tokens)
+        return _configured_dialect_issues(old, new, new_spans, target, known)
+    return _baseline_dialect_issues(old, new, new_spans)
+
+
+def _baseline_dialect_issues(
+    old: Analysis, new: Analysis, new_spans: Sequence[Span]
+) -> list[Issue]:
     before = dialect.find_constructs(old.source, old.root, old.tokens)
     issues = []
     for start, end in new_spans:
@@ -416,12 +443,66 @@ def dialect_issues(old: Analysis, new: Analysis, new_spans: Sequence[Span]) -> l
                     "dialect",
                     ERROR,
                     f"The region now uses {dialect.CONSTRUCTS[construct]}, which the original file never "
-                    "uses. The project may compile as C89 or with an old compiler; write it the way the "
-                    "rest of the file does.",
+                    "uses. The configured C standard is unknown, so use a form the original file supports.",
                     line,
                 )
             )
     return issues
+
+
+def _configured_dialect_issues(
+    old: Analysis, new: Analysis, new_spans: Sequence[Span], target: CStandard, known: KnownNames
+) -> list[Issue]:
+    baseline = dialect.occurrences(old.root, old.tokens, 0, len(old.data))
+    current = dialect.occurrences(new.root, new.tokens, 0, len(new.data))
+    added = Counter(item.identity for item in current) - Counter(item.identity for item in baseline)
+    origins = {name: known.origins.get(name, "header") for name in known.names}
+    origins.update(dict.fromkeys(new.file_scope_names, "source file"))
+    issues = []
+    for item in current:
+        if item.identity not in added:
+            continue
+        offset = item.start
+        if item.depends_on is not None and not _inside(offset, new_spans):
+            offset = item.depends_on
+        if not _inside(offset, new_spans):
+            continue
+        reason = _unsupported_construct(item, target, origins)
+        if reason is not None:
+            line = new.source.line_of(offset)
+            issues.append(Issue("dialect", ERROR, reason, line))
+        del added[item.identity]
+    return issues
+
+
+_HEADER_SPELLINGS = {
+    "bool": "<stdbool.h>",
+    "true": "<stdbool.h>",
+    "false": "<stdbool.h>",
+    "static_assert": "<assert.h>",
+}
+
+
+def _unsupported_construct(
+    item: dialect.Occurrence, target: CStandard, origins: dict[str, str]
+) -> str | None:
+    minimum = dialect.MINIMUM_EDITION[item.kind]
+    configured = f"configured {target.name} ({target.source})"
+    header = _HEADER_SPELLINGS.get(item.spelling)
+    if header is not None and target.year < C23:
+        origin = origins.get(item.spelling)
+        has_project_definition = origin is not None and origin != header
+        if has_project_definition:
+            return None
+        if target.year >= minimum and origin is None:
+            return (
+                f"In {configured}, new use of `{item.spelling}` needs a visible definition "
+                f"from {header} or the project."
+            )
+    if target.year < minimum:
+        description = dialect.CONSTRUCTS[item.kind]
+        return f"The edit adds {description}, which requires C{minimum % 100:02} in {configured}."
+    return None
 
 
 def parse_issues(

@@ -31,39 +31,40 @@ uv run <skill-folder>/scripts/readable_c.py <command> <file> [options]
 
 | Command | Use it to |
 | --- | --- |
-| `doctor FILE` | learn the file's conventions and what the tool can do here |
+| `doctor FILE [--std STANDARD]` | find the configured C standard and the file's conventions |
 | `outline FILE [--findings]` | list functions and declarations with line numbers, without reading the whole file |
 | `start FILE --function NAME` / `--lines A-B` / `--all` | select regions and snapshot the file; prints the regions, what they depend on and the baseline findings |
 | `verify FILE [--diff] [--final]` | prove that nothing outside the regions changed and check that behavior was kept |
 | `check FILE` | list the readability findings left in the regions |
 | `format FILE` | apply the project's `.clang-format` inside the regions only |
-| `reader FILE` | print the brief for the reader pass: the regions as they are now, for a fresh subagent |
+| `reader FILE` | print the current regions, their diff, and the C standard for a fresh subagent |
 | `repair FILE [--encoding ENC]` | undo line-ending or encoding damage that an edit tool did outside the regions |
 | `restore FILE` | put the original text back into the regions |
 | `finish FILE` | forget the snapshot when the work is done; it waits for a `verify --final` of the file as it is |
 
 ## Workflow
 
-1. Run `doctor FILE` once per project. Note the line endings, the encoding, the dialect (C89 or C99) and the boolean type: new code must match them.
+1. Run `doctor FILE`. Note the target C standard and its source, the line endings, the encoding and the boolean type. Standards can differ by file. Use `--std` with `doctor` and `start` when you can confirm the target for this file across supported builds. When the target is unknown, use the original file's tracked features. See [Dialect](references/hazards.md#dialect).
 2. Settle the scope. Use the functions or lines the user named. For a whole file, run `outline` and take one function at a time, or `start --all` when file-scope changes (statics, constants) are wanted. If the request is unclear, ask which functions or lines.
 3. Run `start` with that scope and read what it prints: the region text, the declarations and macros it uses (flagged macros hide a `return` or `goto`, or evaluate an argument twice), the frozen names, the conventions and the baseline findings.
-4. Before the first edit, read [references/rules.md](references/rules.md) and [references/hazards.md](references/hazards.md).
+4. Before the first edit, read [references/rules.md](references/rules.md) and [references/hazards.md](references/hazards.md). Check the project's coding guidance and nearby declarations for comment conventions. Use Doxygen where the project calls for it.
 5. Refactor in small steps, in this order: names, control flow, conditions and expressions, constants, extracting helpers, then comments for whatever is still not obvious. After each step run `verify`. Fix every error it reports before the next step.
 6. Run `check`. Fix each rule finding, or keep a one-line reason for the report. A finding marked new came from your edit: fix it.
 7. If the project has a `.clang-format`, run `format`, then `verify` again.
 8. Do the reader pass (below). It is required.
-9. Run `verify --final` and write the report (below) from its output. Then run `finish`. It refuses when the file changed after the last `verify --final`, because the report would no longer describe the file: run `verify --final` again and update the report. If the user wants the change undone, run `restore`, then `finish`.
+9. Run `verify --final` and write the report (below) from its output. Then run `finish`. If the file or target C standard changes, run the final check again and update the report. To undo the change, run `restore`, then `finish`.
 
 ### The reader pass
 
-You wrote the code, so you cannot see what it leaves unexplained. A reader who has never seen it can:
+Give a fresh reader the current regions, their diff against the snapshot, and the known project C standard. Ask it to find what the new code leaves unexplained and which older practices the refactor introduced.
 
-- **If your harness can start a subagent, you must use one.** That means Claude Code's Agent (Task) tool, a Codex subagent, or any tool that runs a fresh agent with its own context. Start a new subagent and give it exactly this task, with the paths filled in: `Run uv run <skill-folder>/scripts/readable_c.py reader <file> and do what it says.` If the subagent cannot run commands, run `reader FILE` yourself and give it the whole output, unchanged, as its task. Give it nothing else: not your notes, not the original code, not this conversation.
+- **If your harness can start a subagent, you must use one.** Give it this task with the paths filled in: `Run uv run <skill-folder>/scripts/readable_c.py reader <file> and do what it says.` If it cannot run commands, give it the complete `reader FILE` output. Include a short project rule or a nearby documentation example with its source when it establishes the comment format. Keep the brief independent of your notes and conversation.
 - Only when your harness has no way to start a subagent, read the `reader FILE` output yourself as if you had never seen the code, answer it, and say so in the report.
-- The reader answers with two lists:
+- The reader answers with three lists:
   - **A, the code could say it.** Each item comes with the answer the reader worked out from the code. Check that answer against the code, then write it down where the reader needed it: a name, a comment, a named constant, a contract comment or a simpler shape. Write down surprising behavior too ("`retries` stops at 255 and never wraps"), even when you keep it. A comment that does not match the code gets rewritten to say what the code does, even when it was there before you.
   - **B, only outside knowledge answers it.** Answer it with a comment only from a source you can read here, such as a header in the project or the library's documentation, and name the source when it is not obvious. Otherwise add it to "Open questions". Never write a guess into a comment to make a question go away. Questions of why and whether a behavior is intended belong here; keep the behavior.
-- **Repeat until list A comes back empty.** After you change the code, run `verify`, then start a new subagent for the next round (one that saw the old version remembers it). The pass is done when a round that saw the final code returns an empty list A. `verify --final` reports an error until a round has seen the final code or three rounds have run. If the third round still had A questions, fix them and say in the report that no round checked those fixes.
+  - **C, practices introduced by the refactor.** Check each finding against the diff and the project's supported C standard and conventions. Fix older constructs and comment format mismatches when the replacement fits the selected regions and preserves behavior and compatibility. Give a reason in the report for each finding you leave.
+- After any fix, run `verify` and give a fresh reader the updated brief. Finish when the final round returns an empty list A and you have resolved or explained every item in C. Run at most three rounds. If you edit after the last round, report that those edits had no fresh reader.
 
 If `verify` says text outside the regions changed at the byte level only (CRLF became LF, or legacy bytes were re-encoded), your edit tool rewrote the file: run `repair`. If it says real text outside the regions changed, undo that edit; never work around the guard.
 
@@ -81,7 +82,7 @@ The rules come from one idea: the reader should not have to work anything out th
 - `needs-comment`: C that made sense to its author still stops a reader at allocations (who owns the block, why that size), bit operations (what the bits mean), casts that read memory as another type, raw `memcpy`/`memmove` offsets, bounds and offsets added up from literals (`2 * n + 1 < rem`, `pos += 36`: which fields, which sizes), and calls into third-party or system APIs (what they return on failure, who owns what they return). Add a short comment at each such place, or a name that makes it unnecessary. Write only what the code, its headers or the library's documentation show; when you cannot establish a meaning, do not guess: list it under "Open questions" in the report. Comments explain why and what things mean, never what the code does step by step; delete comments that repeat the code and commented-out code. When you rename something, update the comments that use the old name: `verify` lists the ones you missed.
 - `hand-written-library`: a loop that only measures a string or fills or copies an array is a call to `strnlen`, `strlen`, `strcspn`, `memset` or `memcpy`; `check` suggests one only when it is exact.
 - `indent-style` and the conventions: new code looks like the code around it.
-- Keep using the project's own macros and idioms, such as an error-handling macro like `CHECK`, logging macros and asserts. They are the code base's conventions, so expanding one by hand needs a reason in the report.
+- Preserve project macros and types where their semantics or an interface require them. Follow the configured standard and project guidance for new internal code. Expanding a project macro by hand needs a reason in the report.
 
 Advice findings (`magic-number`, `side-effects`, `hand-written-library`, `many-parameters`, `goto`, `param-reassign`, `stacked-casts`, `multiple-declarators`, `commented-out-code`, `boolean-literal`) are judgment calls; act on them when the result reads better. Every other finding is a rule: fix it, or give its reason in the report.
 
@@ -105,7 +106,7 @@ The tool sees a lot, but not types, macros from unseen headers, or every `#if` c
 - Change only the regions. Extracted helpers go in the helper slot, the empty region right before the function that `start` reports for a line range, or inside a function region before the function.
 - Keep frozen names: names that code outside the regions uses keep their name, type and declaration. `verify` checks them.
 - Add no `#include` and no `#if`, `#undef` or `#pragma`. A new `#define` needs a reason in the report; prefer `enum { NAME = 5 };` inside the function.
-- Use only C the file already uses. `verify` rejects `//` comments, declarations after statements, `bool` and other C99 forms in a file that has none.
+- Use C features supported by the configured standard and the headers and declarations already available to the region. If the standard is unknown, `verify` uses the original file's tracked features as a conservative fallback.
 - Changes outside the regions (renaming a global, a header, a prototype) go into the report as proposals.
 
 The details are in [references/regions.md](references/regions.md).
@@ -126,11 +127,11 @@ For each function in a region `verify` reports a tier:
   - a `for` loop written as a `while` loop.
 - Tier 2: the code was restructured (extracted helpers, reordered tests, removed gotos). `verify` lists what changed in calls, literals, writes and jumps. Explain each item in the report, or undo the step.
 
-Errors always block: new syntax errors, constructs the file does not use, names that resolve nowhere, a new local that hides an outer name, a changed frozen name. When a function only reaches tier 2, prefer smaller steps that reach tier 1 one at a time. A rewrite that reads better but reorders tests (`if (t > 5000) ... if (t > 1000) ...` in place of `t > 1000 ? (t > 5000 ? 2 : 1) : 0`) is tier 2: explain why the order does not matter.
+Errors always block: new syntax errors, dialect violations, names that resolve nowhere, a new local that hides an outer name, a changed frozen name. When a function only reaches tier 2, prefer smaller steps that reach tier 1 one at a time. A rewrite that reads better but reorders tests (`if (t > 5000) ... if (t > 1000) ...` in place of `t > 1000 ? (t > 5000 ? 2 : 1) : 0`) is tier 2: explain why the order does not matter.
 
 ## When the tool cannot run
 
-If neither uv nor Python 3.10 to 3.14 is available, follow the rules and hazards by hand, keep the edit inside the regions, and say plainly in the report that no checks ran. Never describe an unchecked change as verified. The reader pass still applies: [references/reader.md](references/reader.md) has the brief to give the subagent, with the code of the regions pasted below it.
+If neither uv nor Python 3.10 to 3.14 is available, follow the rules and hazards by hand, keep the edit inside the regions, and say plainly in the report that no checks ran. Never describe an unchecked change as verified. Use the fallback brief in [references/reader.md](references/reader.md) for the reader pass.
 
 ## Report
 
@@ -142,6 +143,7 @@ Regions: <functions or lines>
 Changes:
 - <rule or reason>: <what changed, where>
 Verification:
+- C standard: <standard and source | unknown, original file features used>
 - Guard (nothing outside the regions changed): passed | failed
 - Errors from verify: <none | list>
 - Equivalence: <function>: tier <0|1|2> (...)
@@ -152,6 +154,7 @@ Comments added: <line>: <what it explains> | none
 Reader pass: <subagent | by myself: the harness has no subagents>, <N> rounds; list A in the last round: <empty | N left, why>
 - A <line>: <reader's question> -> <what changed>
 - B <line>: <reader's question> -> <comment from <source> | open question>
+- C <line>: <new practice or comment format finding> -> <what changed | reason for keeping it>
 Findings left: <rule at line>: <reason> | none
 Open questions: <meanings you could not establish, for the user to answer> | none
 Proposed changes outside the regions: <list> | none

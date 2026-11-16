@@ -109,6 +109,9 @@ def _declared_names(
             else declarator
         )
         name = syntax.declared_name(inner)
+        # The grammar also treats the old typedef spelling `bool` as a keyword.
+        if name is None and node.type == "type_definition" and syntax.text(declarator) == "bool":
+            name = declarator
         if name is None:
             continue
         if node.type == "type_definition":

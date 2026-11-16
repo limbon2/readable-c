@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "skills" / "readable-c" / "scripts"))
 
-from readablec import guard, includes, regions  # noqa: E402  the path is set above
+from readablec import guard, includes, regions, standard  # noqa: E402  the path is set above
 from readablec.analysis import Analysis  # noqa: E402
 from readablec.issues import ERROR, REVIEW  # noqa: E402
 from readablec.verify import compare, names  # noqa: E402
@@ -50,11 +50,12 @@ def main() -> int:
     new = Analysis(current, edited_path)
     old_spans = [(region.start, region.end) for region in selected]
     known = includes.known_names(edited_path, new.tokens)
+    configured_standard = standard.detect(edited_path)
     frozen = names.frozen_entries(old, selected)
     issues = [
         *names.parse_issues(old, selected, new, result.spans),
-        *names.dialect_issues(old, new, result.spans),
-        *names.unresolved_names(old, new, result.spans, known),
+        *names.dialect_issues(old, new, result.spans, configured_standard, known=known),
+        *names.unresolved_names(old, new, result.spans, known, target=configured_standard),
         *names.scope_issues(old, old_spans, new, result.spans),
         *names.frozen_issues(new, result.spans, frozen),
         *names.stale_comment_issues(old, old_spans, new, result.spans),

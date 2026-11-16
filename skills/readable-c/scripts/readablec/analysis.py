@@ -12,10 +12,15 @@ from .source import SourceText
 if TYPE_CHECKING:
     from tree_sitter import Node
 
+    from .standard import CStandard
+
 
 class Analysis:
-    def __init__(self, data: bytes, path: Path | None = None) -> None:
+    def __init__(
+        self, data: bytes, path: Path | None = None, configured_standard: CStandard | None = None
+    ) -> None:
         self.source = SourceText(data, path)
+        self.configured_standard = configured_standard
         self.tree = syntax.parse(data)
         self.root: Node = self.tree.root_node
         self._scopes: dict[tuple[int, int], scopes.FunctionScope] = {}
@@ -38,7 +43,7 @@ class Analysis:
 
     @cached_property
     def conventions(self) -> conventions.Conventions:
-        return conventions.detect(self.source, self.root, self.tokens)
+        return conventions.detect(self.source, self.root, self.tokens, self.configured_standard)
 
     @cached_property
     def file_scope_names(self) -> set[str]:

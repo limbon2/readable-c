@@ -4,6 +4,11 @@ All notable changes to readable-c are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- `doctor`, `start` and `verify` use the file's configured C standard when available. A confirmed `--std` override can be saved for the refactor session. The original file's tracked features remain the fallback when the standard is unknown.
+- The reader brief shows the selected regions' diff and asks the reader to flag older practices and comment format mismatches introduced by the refactor. Function documentation follows the project's format, including Doxygen where established.
+
 ## [0.4.0] - 2026-11-12
 
 ### Added

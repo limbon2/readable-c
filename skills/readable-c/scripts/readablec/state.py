@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import standard
 from .regions import Region
 
 STATE_DIR_VARIABLE = "READABLE_C_STATE_DIR"
@@ -48,10 +49,17 @@ class Snapshot:
     baseline: list[dict[str, object]] = field(default_factory=list)
     frozen: list[dict[str, object]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
-    # Digests of the region text that `reader` wrote a brief for, oldest first.
+    # Digests of the region text and dialect that `reader` showed, oldest first.
     reader_briefs: list[str] = field(default_factory=list)
-    # Digest of the whole file at the last `verify --final`, which `finish` compares.
+    # The file and C standard that last passed `verify --final`.
     final_digest: str | None = None
+    final_standard: str | None = None
+    standard_override: str | None = None
+
+    def configured_standard(self) -> standard.CStandard | None:
+        if self.standard_override is not None:
+            return standard.parse(self.standard_override, "--std")
+        return standard.detect(self.path)
 
 
 def state_dir() -> Path:
@@ -151,6 +159,8 @@ def save(snapshot: Snapshot) -> Path:
         "notes": snapshot.notes,
         "reader_briefs": snapshot.reader_briefs,
         "final_digest": snapshot.final_digest,
+        "final_standard": snapshot.final_standard,
+        "standard_override": snapshot.standard_override,
     }
     _write_private(original_path, snapshot.original)
     _write_private(metadata_path, json.dumps(metadata, indent=2).encode("utf-8"))
@@ -190,6 +200,8 @@ def load(path: Path) -> Snapshot:
         notes=metadata.get("notes", []),
         reader_briefs=metadata.get("reader_briefs", []),
         final_digest=metadata.get("final_digest"),
+        final_standard=metadata.get("final_standard"),
+        standard_override=metadata.get("standard_override"),
     )
 
 

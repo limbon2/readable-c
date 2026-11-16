@@ -8,7 +8,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import __version__
+from . import __version__, standard
 from .commands import edit, inspect, reader, review, start
 from .commands.common import EXIT_USAGE, CommandError, configure_console
 from .syntax import MissingDependencyError
@@ -35,6 +35,13 @@ def _line_range(text: str) -> tuple[int, int]:
     if last < first:
         raise argparse.ArgumentTypeError(f"the range {text!r} ends before it starts")
     return first, last
+
+
+def _c_standard(text: str) -> standard.CStandard:
+    target = standard.parse(text, "--std")
+    if target is None:
+        raise argparse.ArgumentTypeError(f"expected a C standard such as c99 or c17, got {text!r}")
+    return target
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -92,6 +99,10 @@ def _parser() -> argparse.ArgumentParser:
         help="a folder to search for headers",
     )
     begin.add_argument("--quiet", action="store_true", help="do not print the region text")
+    for subcommand in (doctor, begin):
+        subcommand.add_argument(
+            "--std", type=_c_standard, metavar="STANDARD", help="use a known project C standard"
+        )
 
     command("check", "list the readability findings inside the regions")
 
@@ -116,7 +127,7 @@ def _parser() -> argparse.ArgumentParser:
     command(
         "reader",
         "print a brief for a first-time reader of the regions as they are now; a fresh subagent "
-        "answers it with the questions the code leaves open",
+        "looks for open questions and older practices introduced by the refactor",
     )
 
     repair = command(
@@ -133,8 +144,7 @@ def _parser() -> argparse.ArgumentParser:
 
     finish = command(
         "finish",
-        "forget the snapshot once the refactor is done; refuses when the file changed after the "
-        "last verify --final",
+        "forget the snapshot after verify --final succeeds for the current file and C standard",
     )
     finish.add_argument("--force", action="store_true", help="drop the snapshot without that check")
     return parser
@@ -158,7 +168,7 @@ def _dispatch(arguments: argparse.Namespace) -> int:  # noqa: PLR0911  one retur
     name = arguments.command
     as_json = arguments.json
     if name == "doctor":
-        return inspect.doctor(arguments.file, as_json)
+        return inspect.doctor(arguments.file, as_json, arguments.std)
     if name == "outline":
         return inspect.outline(arguments.file, arguments.findings, as_json)
     if name == "start":
@@ -171,6 +181,7 @@ def _dispatch(arguments: argparse.Namespace) -> int:  # noqa: PLR0911  one retur
             include_dirs=arguments.include,
             quiet=arguments.quiet,
             as_json=as_json,
+            standard_override=arguments.std,
         )
     if name == "check":
         return review.check(arguments.file, as_json)

@@ -54,7 +54,7 @@ Lines 140-195 of net/packet.c, inside handle_packet, are a mess. Clean up just t
 Untangle load_config and apply_config in config.c.
 ```
 
-The agent selects the regions with `start`, edits in small steps, runs `verify` after each step and `check` for the findings left. Then a fresh subagent that has never seen the code reads it (`reader`) and lists the questions it would have to ask the author: what the code could say, and what only outside knowledge answers. The agent fixes every question of the first kind in the code, with a name, a comment or a named constant, and repeats the pass until a new reader finds none; questions of the second kind get a comment from a source the agent can read, or go to the report as open questions. The agent ends with a report: what changed, what was proven, what it could not prove and why, the reader's questions, and the changes it proposes outside the regions.
+The agent checks the configured C standard with `doctor`, selects the regions with `start`, and runs `verify` after each edit. A fresh subagent uses `reader` to inspect the current regions and their diff. It asks what the code could explain, notes questions that need an outside source, and flags older practices or comment format mismatches introduced by the refactor. The agent addresses the feedback within the regions and reports what changed, what `verify` established, and which questions or findings remain.
 
 For each function, `verify` reports a tier:
 

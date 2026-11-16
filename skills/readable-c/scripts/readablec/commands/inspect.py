@@ -7,11 +7,11 @@ import platform
 import shutil
 from pathlib import Path
 
-from .. import formatting, includes, state, syntax
+from .. import formatting, includes, standard, state, syntax
 from ..analysis import Analysis
 from ..rules import run_rules
 from ..rules.style import max_nesting
-from .common import EXIT_CLEAN, Output, display_path, read_file
+from .common import EXIT_CLEAN, CommandError, Output, display_path, read_file
 
 OUTLINE_KINDS = {"prototype", "variable", "typedef", "struct", "union", "enum", "macro"}
 
@@ -23,7 +23,11 @@ def _package_version(name: str) -> str | None:
         return None
 
 
-def doctor(path: Path | None, as_json: bool) -> int:
+def doctor(
+    path: Path | None, as_json: bool, standard_override: standard.CStandard | None = None
+) -> int:
+    if standard_override is not None and path is None:
+        raise CommandError("Give `doctor` a file when passing --std.")
     output = Output(as_json)
     tools = {
         "python": platform.python_version(),
@@ -38,13 +42,15 @@ def doctor(path: Path | None, as_json: bool) -> int:
         output.line(f"{name}: {value or 'not available'}")
     report: dict[str, object] = {"tools": tools}
     if path is not None:
-        report["file"] = _describe_file(output, path)
+        report["file"] = _describe_file(output, path, standard_override)
     output.json(report)
     return EXIT_CLEAN
 
 
-def _describe_file(output: Output, path: Path) -> dict[str, object]:
-    analysis = Analysis(read_file(path), path)
+def _describe_file(
+    output: Output, path: Path, standard_override: standard.CStandard | None
+) -> dict[str, object]:
+    analysis = Analysis(read_file(path), path, standard_override or standard.detect(path))
     conventions = analysis.conventions
     errors = syntax.error_nodes(analysis.root)
     error_lines = sorted({syntax.start_line(node) for node in errors})
@@ -80,7 +86,7 @@ def _describe_file(output: Output, path: Path) -> dict[str, object]:
 
 def outline(path: Path, with_findings: bool, as_json: bool) -> int:
     output = Output(as_json)
-    analysis = Analysis(read_file(path), path)
+    analysis = Analysis(read_file(path), path, standard.detect(path) if with_findings else None)
     items: list[dict[str, object]] = []
     for function in analysis.functions:
         node = function.node

@@ -133,22 +133,26 @@ def finish(path: Path, force: bool, as_json: bool) -> int:
 def _unchecked_changes(path: Path) -> str | None:
     """Why the snapshot must stay: the file holds changes that no `verify --final` checked.
 
-    The report is written from `verify --final`. An edit after it, even to a comment, can
-    make the report wrong, so `finish` waits for a final check of the file as it is."""
-    if not state.exists(path):
-        return None
+    The report is written from `verify --final`. An edit after it, even to a comment,
+    or a change to the target standard can make the report wrong."""
     try:
         snapshot = state.load(path)
     except state.StateError:
         return None
     current = read_file(path)
-    if current == snapshot.original or snapshot.final_digest == state.file_digest(current):
+    if current == snapshot.original:
         return None
     if snapshot.final_digest is None:
         return (
-            "`verify --final` has not run. Run it, write the report from its output, then run "
+            "`verify --final` has not run successfully. Run it, write the report, then run "
             "`finish` again. To undo the refactor instead, run `restore`, then `finish`."
         )
+    target = snapshot.configured_standard()
+    standard_name = target.name if target is not None else None
+    if snapshot.final_standard != standard_name:
+        return "The C standard changed after `verify --final`. Run it again and update the report."
+    if snapshot.final_digest == state.file_digest(current):
+        return None
     return (
         "The file changed after the last `verify --final`. Run it again, write the report from "
         "its output, then run `finish` again."

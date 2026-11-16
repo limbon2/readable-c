@@ -75,8 +75,8 @@ def _looks_like_condition(parts: list[Node]) -> bool:
 
 
 def _statement_severity(context: RuleContext) -> str:
-    # Naming a part needs a declaration in the middle of a block, which a file
-    # without C99 declarations cannot take; there it is a judgment call.
+    # Naming a part may need a declaration after a statement. Give advice when
+    # the dialect check cannot allow that placement.
     return RULE if context.conventions.allows_mixed_declarations else ADVICE
 
 

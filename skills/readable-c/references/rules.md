@@ -42,7 +42,7 @@ After the change, `len` still means what the caller passed, which helps the code
 
 ## Conditions
 
-### named-conditions (rule in `if`, `?:` and `return`; advice in loops and in files without C99 declarations)
+### named-conditions (rule in `if`, `?:` and `return` when mixed declarations are supported)
 
 Ported from Mannie's ESLint rule. A part of an `&&`/`||` condition counts as named when it is a variable, a member path (`cfg->enabled`, `rows[i]`), a literal, a call of a named function with plain arguments (`is_empty(list)`, `strcmp(a, b)`), or the negation of one of these. Comparisons, arithmetic and calls with computed arguments get a name first.
 
@@ -50,7 +50,7 @@ Ported from Mannie's ESLint rule. A part of an `&&`/`||` condition counts as nam
 /* before */
 if (count > 0 && is_visible) { ... }
 /* after */
-bool has_items = count > 0;      /* use the file's boolean type: bool, BOOL or int */
+bool has_items = count > 0;      /* bool when available here */
 if (has_items && is_visible) { ... }
 ```
 
@@ -71,7 +71,7 @@ static int has_data(const struct packet *p) { return p != NULL && p->len > 0; }
 
 - An initializer is never checked: `int is_valid = a && b;` already names the whole condition.
 - Loops evaluate their condition on every pass, so a variable set before the loop would go stale. Use a static function such as `is_at_end(...)`, or leave the condition and say why.
-- In a file without declarations after statements (C89), a new variable must go at the start of the block, which moves where it is evaluated. There, prefer a static function, or leave the condition.
+- If the target or the fallback dialect check requires declarations at block start, use a static function or leave the condition. Preserve where the test is evaluated. In this case and in loops, the finding is advice.
 - `verify` proves the change (tier 1) when the named value is used once, right after its declaration, and moving it cannot fault or reorder side effects.
 
 ### nested-ternary (rule)
@@ -333,7 +333,7 @@ Do not extract a helper that is used once and has no meaning of its own, do not 
 
 ## Project conventions
 
-Keep using the project's own macros and idioms: error-handling macros such as `CHECK(x)`, logging and tracing macros, assertion macros, and the project's typedefs (`BOOL`, `u8`). They are how the rest of the code base reads. Expanding one by hand, or replacing it with your own pattern, makes the region the odd one out; when it really reads better, say why in the report and propose the change for the whole code base instead.
+Keep project macros and types where they carry a contract. For example, `CHECK(x)` may hide a jump, and `BOOL` or `u8` may be required by an interface. For a new local or helper, choose a form that fits the project's supported C standard and conventions. Explain any macro replacement in the report, including how it keeps the original evaluation and control flow.
 
 ## Comments
 
@@ -377,7 +377,7 @@ A name often says it better than a comment: `enum { CHANNEL_SHIFT = 4, CHANNEL_M
 
 ### function-contract (rule)
 
-A function in a region that is longer than 10 lines starts with a comment above it, so a reader learns what it is for before reading its body:
+A function in a region that is longer than 10 lines starts with a contract comment above it, so a reader learns what it is for before reading its body. Follow the project's function documentation format:
 
 ```c
 /* Takes the oldest record off the queue. Returns 0, or -1 when the queue is empty;
@@ -385,7 +385,7 @@ A function in a region that is longer than 10 lines starts with a comment above 
 static int queue_pop(struct queue *q, struct record *rec)
 ```
 
-Say what it does, what it returns (and what it returns on failure), and who frees memory it allocates or takes. One or two lines; write only what the code shows, and leave the step-by-step to the body.
+Say what it does, what it returns on success and failure, and who frees memory it allocates or takes. Keep it short and write what the code shows. If the project uses Doxygen for function contracts, match the established delimiter and tags, such as `@param` and `@return`. When a parameter is renamed, update its tag in any edited contract.
 
 ### Only true comments
 
@@ -400,7 +400,7 @@ A wrong comment is worse than none, because the reader trusts it. Write only wha
 
 - Put a comment above the line or block it explains, or at the end of a short line. One line is usually enough.
 - Say why, or what something means. Never narrate what the code does step by step: `i++; /* increment i */` repeats the code, so delete such comments.
-- Use the file's comment style (`/* */` in a file without `//` comments) and the language of its other comments.
+- Follow the project's documentation and inline comment conventions. Use nearby examples for the same kind of comment when the project has no written guidance. Use the language of the other comments and syntax supported by the target standard.
 - In a file that is not UTF-8 (`doctor` shows the encoding, for example cp1251), new non-ASCII text needs converting: `verify` reports it, and `repair --encoding cp1251` converts the new lines. Plain ASCII avoids the step.
 - Keep comments that carry information, such as license headers, author notes and the reasons for workarounds. Rewrite a comment that the refactor made wrong: after a rename, `verify` points at old comments that still use the old name, such as a header comment that says `ctx->buf` once the parameter is `stream`.
 - `commented-out-code` (advice): delete disabled code, because version control keeps it. Ask first when the project has no version control.
@@ -421,4 +421,4 @@ Work in small steps and run `verify` after each, so that each step reaches tier 
 4. Constants.
 5. Helpers (tier 2: explain them).
 6. Comments for what is still not obvious (`needs-comment`, `function-contract`), and open questions for what you could not establish.
-7. The reader pass: a fresh subagent reads the result and asks what it does not understand (see SKILL.md and [reader.md](reader.md)).
+7. The reader pass: a fresh subagent reads the result and its diff, asks what it does not understand, and flags older practices introduced by the edit. See [reader.md](reader.md).

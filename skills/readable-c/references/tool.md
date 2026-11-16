@@ -36,9 +36,11 @@ Offline machines: on a machine with internet, run `pip download --only-binary :a
 
 ## Commands
 
-### doctor [FILE]
+### doctor [FILE] [--std STANDARD]
 
-Shows Python, the package versions, clang-format and the state folder. With a file, also its line endings, encoding (with a guess for legacy code pages), indentation, brace placement, dialect, boolean type, naming styles, constant style, parse problems, `.clang-format`, and the headers the tool cannot find.
+Shows Python, the package versions, clang-format and the state folder. With a file, also shows the configured C standard and its source, line endings, encoding (with a guess for legacy code pages), indentation, brace placement, boolean type, naming styles, constant style, parse problems, `.clang-format`, and missing headers.
+
+The tool looks for explicit C standard flags in `compile_commands.json` entries for the file. When known entries use different editions, it uses the oldest to cover all of them. It can also use a simple literal `CMAKE_C_STANDARD` setting in `CMakeLists.txt` as a requested default. If the build data is inconclusive, it reports the standard as unknown and uses the original file's tracked features. When you can confirm the standard from another project source, pass it with `--std`, for example `--std c17`.
 
 ### outline FILE [--findings]
 
@@ -46,7 +48,7 @@ Lists functions, prototypes, globals, types and macros with their lines. Functio
 
 ### start FILE (--function NAME | --lines A-B)... | --all
 
-Options: `--replace` drops a snapshot in progress; `--include DIR` (repeatable) adds a folder to search for headers; `--quiet` leaves out the region text.
+Use `--replace` to drop a snapshot in progress, `--include DIR` (repeatable) to add a header search folder, and `--quiet` to omit the region text. `--std STANDARD` records a confirmed standard for the session.
 
 Prints:
 
@@ -70,14 +72,14 @@ Runs the guard, then:
 | --- | --- |
 | new syntax errors in the regions | error |
 | new lines that hold UTF-8 text in a file that is not UTF-8 (fix with `repair --encoding`) | error |
-| C constructs the original file never uses (dialect) | error |
+| new uses of tracked constructs outside the configured C standard, or first uses of tracked constructs absent from the original file when the standard is unknown | error |
 | names that resolve nowhere (likely a typo or a missed rename) | error, or review when some headers could not be read |
 | a new local that hides an outer name; a name declared twice in one block; a `const` local that is assigned; a `goto` without its label | error |
 | frozen names missing or changed | error |
 | an old comment that still mentions a local or parameter the function no longer declares (a missed rename) | review |
 | an object-like `#define` added or removed | review |
 | tier 2 inventory differences | review |
-| with `--final`: no reader round has seen the final code, and fewer than three rounds ran | error |
+| with `--final`: no reader round has seen the final code under the current standard, and fewer than three rounds ran with that standard | error |
 
 Then it prints the equivalence tier of each function and a summary of the findings. `--diff` adds a unified diff of each region; `--final` adds the data for the report, including whether a reader brief showed the code as it is now. Exits 1 when there is an error.
 
@@ -87,7 +89,7 @@ Needs a `.clang-format` (or `_clang-format`) in the file's folder or above. The 
 
 ### reader FILE
 
-Prints the brief for the reader pass: instructions for a first-time reader, the current text of the regions with line numbers, the declarations from the same file that the code uses (and the types those declarations use), and the names that come from headers. It leaves out the original code and the findings. Give the output to a fresh subagent; see [reader.md](reader.md). Each brief records a digest of the region text, which `verify --final` compares with the code as it is now.
+Prints the instructions, the current region text with line numbers, the declarations and header names it uses, the configured standard, and the diff of the selected regions. Give the output to a fresh subagent as described in [reader.md](reader.md). Each brief records a digest tied to the region text and standard it showed.
 
 ### repair FILE [--encoding CODEC]
 
@@ -99,7 +101,7 @@ Puts the original text back into the regions. `--whole-file` writes back the who
 
 ### finish FILE [--force]
 
-Deletes the snapshot. It refuses (exit 1) while the file holds changes that no `verify --final` has checked: when `verify --final` never ran, or the file changed after the last one, even in a comment. The report is written from `verify --final`, so a later edit can make it wrong. A file that `restore` put back passes. `--force` deletes the snapshot without the check; use it only when the user asks to stop.
+Deletes the snapshot after `verify --final` succeeds for the current file and C standard. A file that `restore` put back passes. `--force` deletes the snapshot without the check. Use it only when the user asks to stop.
 
 ## Output
 

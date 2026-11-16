@@ -8,13 +8,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from . import dialect, lexer, syntax
+from . import dialect, includes, lexer, syntax
 from .encoding import EncodingInfo, detect_encoding
+from .standard import C23
 
 if TYPE_CHECKING:
     from tree_sitter import Node
 
     from .source import SourceText
+    from .standard import CStandard
 
 BOOLEAN_TYPEDEFS = ("BOOL", "BOOLEAN", "boolean", "bool_t", "boolean_t", "Bool", "gboolean")
 
@@ -42,31 +44,27 @@ class Conventions:
     block_brace: str
     constructs: dict[str, int]
     boolean_type: str
+    configured_standard: CStandard | None = None
     naming: dict[str, str] = field(default_factory=dict)
     constant_style: str = "unknown"
     longest_line: int = 0
     typical_line_limit: int = 0
 
     @property
-    def looks_like_c89(self) -> bool:
-        return dialect.looks_like_c89(self.constructs)
-
-    @property
     def allows_mixed_declarations(self) -> bool:
+        if self.configured_standard is not None:
+            return self.configured_standard.year >= dialect.MINIMUM_EDITION["mixed-declarations"]
         return "mixed-declarations" in self.constructs
 
     def describe(self) -> list[str]:
         indent = self.indent_char
         if self.indent_width:
             indent += f", width {self.indent_width}"
-        if self.looks_like_c89:
-            dialect_note = (
-                "no C99 features seen: declare variables at the start of a block, "
-                "use /* */ comments, no bool"
-            )
+        if self.configured_standard is None:
+            used = ", ".join(sorted(self.constructs)) or "none"
+            dialect_note = f"configured standard unknown; match the features in this file ({used})"
         else:
-            used = ", ".join(sorted(name for name in self.constructs if name in dialect.C99_HINTS))
-            dialect_note = f"C99 features in use: {used}"
+            dialect_note = f"{self.configured_standard.name} ({self.configured_standard.source})"
         naming = ", ".join(f"{kind}: {style}" for kind, style in sorted(self.naming.items()))
         return [
             f"line endings: {self.line_endings}"
@@ -84,7 +82,12 @@ class Conventions:
         ]
 
 
-def detect(source: SourceText, root: Node, tokens: Sequence[lexer.Token]) -> Conventions:
+def detect(
+    source: SourceText,
+    root: Node,
+    tokens: Sequence[lexer.Token],
+    configured_standard: CStandard | None,
+) -> Conventions:
     indent_char, indent_width = _indentation(source, tokens)
     lengths = sorted(len(source.line_bytes(line)) for line in range(1, source.line_count + 1))
     return Conventions(
@@ -98,7 +101,8 @@ def detect(source: SourceText, root: Node, tokens: Sequence[lexer.Token]) -> Con
         function_brace=_function_brace_style(root),
         block_brace=_block_brace_style(root),
         constructs=dialect.find_constructs(source, root, tokens),
-        boolean_type=_boolean_type(root, tokens),
+        boolean_type=_boolean_type(root, tokens, configured_standard),
+        configured_standard=configured_standard,
         naming=_naming(root, tokens),
         constant_style=_constant_style(root, tokens),
         longest_line=lengths[-1] if lengths else 0,
@@ -184,17 +188,20 @@ def _majority(votes: Counter[str]) -> str:
     return winner
 
 
-def _boolean_type(root: Node, tokens: Sequence[lexer.Token]) -> str:
-    includes_stdbool = any(
-        token.kind == lexer.DIRECTIVE and b"stdbool.h" in token.text for token in tokens
-    )
+def _boolean_type(root: Node, tokens: Sequence[lexer.Token], target: CStandard | None) -> str:
+    if target is not None and target.year >= C23:
+        return "bool (C23 keyword)"
+    includes_stdbool = ("stdbool.h", True) in includes.included_headers(tokens)
     used_types: Counter[str] = Counter()
     for node in syntax.walk(root):
         if node.type == "primitive_type" and syntax.text(node) == "bool":
             used_types["bool"] += 1
         elif node.type == "type_identifier" and syntax.text(node) in BOOLEAN_TYPEDEFS:
             used_types[syntax.text(node)] += 1
-    if includes_stdbool or used_types["bool"]:
+    has_bool = includes_stdbool or used_types["bool"]
+    if target is not None and target.year >= dialect.MINIMUM_EDITION["_Bool"]:
+        return "bool (available in this file)" if has_bool else "_Bool (C99 keyword)"
+    if target is None and has_bool:
         return "bool (<stdbool.h>)"
     project_types = [name for name, _ in used_types.most_common() if name != "bool"]
     if project_types:

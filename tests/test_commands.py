@@ -90,6 +90,62 @@ def test_dialect_and_unresolved_names_are_errors(run_cli, fixture_copy):
     assert "`totl` is not declared" in result.out
 
 
+def test_configured_standard_allows_tier_one_edit_inside_a_line_range(run_cli, tmp_path):
+    path = tmp_path / "items.c"
+    cmake = tmp_path / "CMakeLists.txt"
+    config = "project(items C)\nset(CMAKE_C_STANDARD 17)\nadd_library(items items.c)\n"
+    cmake.write_text(config, encoding="utf-8")
+    frozen_comment = "/* Комментарии. */\r\n".encode("cp1251")
+    condition = b"    if (count > 1 && enabled) {\r\n"
+    original = (
+        frozen_comment + b"int item_count(int count, int enabled)\r\n{\r\n"
+        b"    if (count < 0) {\r\n        return 0;\r\n    }\r\n"
+        + condition
+        + b"        return count;\r\n    }\r\n    return 0;\r\n}\r\n"
+    )
+    path.write_bytes(original)
+    doctor = run_cli("doctor", str(path))
+    assert "dialect: C17" in doctor.out and "CMakeLists.txt" in doctor.out
+    result = run_cli("start", str(path), "--lines", "7-9")
+    assert result.code == 0, result.out + result.err
+    edited = original.replace(
+        condition, b"    const int has_items = count > 1;\r\n    if (has_items && enabled) {\r\n"
+    )
+    path.write_bytes(edited)
+    result = run_cli("verify", str(path), "--json")
+    assert result.code == 0, result.out
+    assert json.loads(result.out)["functions"][0]["tier"] == 1
+    assert path.read_bytes() == edited
+
+    path.write_bytes(edited.replace(frozen_comment, b"/* frozen text changed */\r\n"))
+    guarded = run_cli("verify", str(path), "--json")
+    assert guarded.code == 1
+    assert json.loads(guarded.out)["guard"] == "failed"
+
+    path.write_bytes(edited)
+    assert run_cli("reader", str(path)).code == 0
+    assert run_cli("verify", str(path), "--final").code == 0
+    cmake.write_text(config.replace("STANDARD 17", "STANDARD 90"), encoding="utf-8")
+    stale = run_cli("finish", str(path))
+    assert stale.code == 1 and "C standard changed" in stale.out
+    result = run_cli("verify", str(path), "--json")
+    assert result.code == 1
+    assert any(issue["check"] == "dialect" for issue in json.loads(result.out)["errors"])
+
+
+def test_confirmed_standard_is_saved_for_the_session(run_cli, tmp_path):
+    path = tmp_path / "items.c"
+    path.write_bytes(b"int count(void) {\n    int total = 0;\n    return total;\n}\n")
+    assert run_cli("start", str(path), "--all", "--std", "c17").code == 0
+    path.write_bytes(
+        path.read_bytes().replace(b"    return", b"    // Count the items.\n    return")
+    )
+    assert run_cli("verify", str(path)).code == 0
+    assert "C17 (--std)" in run_cli("reader", str(path)).out
+    assert run_cli("verify", str(path), "--final").code == 0
+    assert run_cli("finish", str(path)).code == 0
+
+
 def test_start_twice_needs_replace(run_cli, fixture_copy):
     path = fixture_copy("inventory.c")
     assert run_cli("start", str(path), "--function", "cnt").code == 0
@@ -198,7 +254,10 @@ def test_reader_brief_shows_the_current_regions_and_is_tracked(run_cli, fixture_
     assert brief.code == 0
     assert brief.out.startswith("You are a C developer reading this code for the first time.")
     assert "static int cnt(int lowest, int hi)" in brief.out
-    assert "int lo," not in brief.out, "the brief must not show the original code"
+    current_code, diff = brief.out.split("== Changes from the snapshot")
+    assert "int lo," not in current_code
+    assert "-static int cnt(int lo, int hi)" in diff
+    assert "+static int cnt(int lowest, int hi)" in diff
     assert "- struct `item`:" in brief.out, "the type behind `items` is shown too"
     assert "find_item" not in brief.out, "code outside the regions stays out"
     current = json.loads(run_cli("verify", str(path), "--json").out)["reader"]
@@ -225,9 +284,11 @@ def test_reader_guide_holds_the_same_brief_as_the_tool():
     assert BRIEF in guide
 
 
-def test_reader_brief_sorts_questions_into_two_lists():
+def test_reader_brief_asks_questions_and_reviews_new_practices():
     assert "A. The code could say it" in BRIEF
     assert "B. Only outside knowledge answers it" in BRIEF
+    assert "C. Older practices and comment format mismatches introduced by the refactor" in BRIEF
+    assert "a comparable documented function" in " ".join(BRIEF.split())
     assert "a comment that does not match what the code does" in BRIEF
 
 
@@ -272,13 +333,17 @@ def test_finish_waits_for_a_final_check_of_the_file_as_it_is(run_cli, fixture_co
     assert unchecked.code == 1
     assert "`verify --final` has not run" in unchecked.out
 
-    run_cli("verify", str(path), "--final")
+    assert run_cli("reader", str(path)).code == 0
+    assert run_cli("verify", str(path), "--final").code == 0
     path.write_text(edited.replace("/* Counts", "/* Counts all"), newline="")
     changed = run_cli("finish", str(path))
     assert changed.code == 1
     assert "changed after the last `verify --final`" in changed.out
 
-    run_cli("verify", str(path), "--final")
+    assert run_cli("verify", str(path), "--final").code == 1
+    assert run_cli("finish", str(path)).code == 1
+    assert run_cli("reader", str(path)).code == 0
+    assert run_cli("verify", str(path), "--final").code == 0
     assert run_cli("finish", str(path)).code == 0
     assert "No refactor in progress" in run_cli("verify", str(path)).err
 

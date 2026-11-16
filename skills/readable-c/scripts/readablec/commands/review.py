@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import difflib
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -21,6 +20,7 @@ from .common import (
     open_session,
     print_finding,
     print_issue,
+    region_diffs,
 )
 
 
@@ -86,6 +86,7 @@ def verify(
     old_spans = [(region.start, region.end) for region in session.regions]
     new_spans = session.spans
     known = includes.known_names(path, new.tokens, include_dirs)
+    target = session.configured_standard
     issues: list[Issue] = list(session.result.issues)
     issues.extend(
         guard.foreign_text_issues(
@@ -93,8 +94,8 @@ def verify(
         )
     )
     issues.extend(names.parse_issues(old, session.regions, new, new_spans))
-    issues.extend(names.dialect_issues(old, new, new_spans))
-    issues.extend(names.unresolved_names(old, new, new_spans, known))
+    issues.extend(names.dialect_issues(old, new, new_spans, target, known=known))
+    issues.extend(names.unresolved_names(old, new, new_spans, known, target=target))
     issues.extend(names.scope_issues(old, old_spans, new, new_spans))
     issues.extend(names.frozen_issues(new, new_spans, session.snapshot.frozen))
     issues.extend(names.stale_comment_issues(old, old_spans, new, new_spans))
@@ -134,7 +135,10 @@ def verify(
     if final:
         state.save(
             dataclasses.replace(
-                session.snapshot, path=path, final_digest=state.file_digest(session.current)
+                session.snapshot,
+                path=path,
+                final_digest=None if errors else state.file_digest(session.current),
+                final_standard=target.name if target is not None else None,
             )
         )
         _print_report_data(
@@ -163,24 +167,8 @@ def verify(
 
 
 def _print_diff(output: Output, session: Session) -> None:
-    old = session.original_analysis()
-    encoding = old.conventions.encoding.name
-    for region, (start, end) in zip(session.regions, session.spans, strict=True):
-        before = session.snapshot.original[region.start : region.end].decode(
-            encoding, "backslashreplace"
-        )
-        after = session.current[start:end].decode(encoding, "backslashreplace")
+    for region, diff in region_diffs(session):
         output.section(f"Diff of {region.label}")
-        first_line = (
-            old.source.line_of(region.start) if region.start < len(session.snapshot.original) else 1
-        )
-        diff = difflib.unified_diff(
-            before.splitlines(),
-            after.splitlines(),
-            fromfile=f"original (from line {first_line})",
-            tofile="current",
-            lineterm="",
-        )
         for line in diff:
             output.line(line)
 
@@ -198,6 +186,11 @@ def _print_report_data(
     output.section("Data for the report")
     output.line(f"File: {display_path(path)}")
     output.line("Regions: " + "; ".join(region.label for region in session.regions))
+    target = session.configured_standard
+    dialect_note = (
+        f"{target.name} ({target.source})" if target is not None else "file features only"
+    )
+    output.line(f"Dialect check: {dialect_note}")
     output.line(f"Guard: passed. Errors: {len(errors)}. Review items: {len(review_items)}.")
     proven = [result.name for result in results if result.tier in (0, 1)]
     unproven = [result.name for result in results if result.tier not in (0, 1)]
@@ -211,17 +204,11 @@ def _print_report_data(
 MAX_READER_ROUNDS = 3
 
 
-def _current_digest(session: Session) -> str:
-    from .reader import region_digest  # noqa: PLC0415  reader imports this module
-
-    spans = [span for span in session.spans if span[0] < span[1]]
-    return region_digest(session.current, spans)
-
-
 def reader_status(session: Session) -> str:
     """Whether a reader brief showed the code as it is now, and in which round."""
-    briefs = session.snapshot.reader_briefs
-    digest = _current_digest(session)
+    from .reader import reader_rounds  # noqa: PLC0415  reader imports this module
+
+    briefs, digest = reader_rounds(session)
     if digest in briefs:
         return f"round {briefs.index(digest) + 1} showed the current code ({len(briefs)} briefs in all)"
     if len(briefs) >= MAX_READER_ROUNDS:
@@ -234,19 +221,32 @@ def reader_status(session: Session) -> str:
             f"the code changed after the last of {len(briefs)} briefs: run `reader` again and give it "
             "to a fresh subagent"
         )
+    if session.snapshot.reader_briefs:
+        return (
+            "not run with the current reader brief and C standard: run `reader` again and give "
+            "it to a fresh subagent"
+        )
     return "not run: run `reader` and give it to a fresh subagent (required, see SKILL.md)"
 
 
 def reader_gate_issue(session: Session) -> Issue | None:
-    """The final check needs a reader round that saw the final code, unless three rounds ran."""
-    briefs = session.snapshot.reader_briefs
-    if _current_digest(session) in briefs or len(briefs) >= MAX_READER_ROUNDS:
+    """The final check needs a reader round for the current code and C standard."""
+    from .reader import reader_rounds  # noqa: PLC0415  reader imports this module
+
+    briefs, digest = reader_rounds(session)
+    if digest in briefs or len(briefs) >= MAX_READER_ROUNDS:
         return None
     if briefs:
         message = (
             f"The code changed after the last reader round ({len(briefs)} so far). Run `reader` "
             "again and give it to a new subagent: the pass is done when a round that sees the "
-            f"final code returns an empty list A, or after {MAX_READER_ROUNDS} rounds."
+            f"final code returns an empty list A and every item in list C is addressed, "
+            f"or after {MAX_READER_ROUNDS} rounds."
+        )
+    elif session.snapshot.reader_briefs:
+        message = (
+            "No reader brief used the current instructions and C standard. Run `reader` again "
+            "and give it to a fresh subagent."
         )
     else:
         message = (

@@ -60,15 +60,17 @@ Contents: [Evaluation](#evaluation) · [Types](#types) · [Macros](#macros) · [
 
 ## Dialect
 
-Without a compiler, using only the C the file already uses is the main protection against an edit that does not compile. `verify` rejects these when the original file never uses them:
+`doctor FILE` reports the configured C standard and its source when it can identify them. If you can confirm the standard for this file across supported targets, `doctor FILE --std c17` and `start FILE --std c17` accept that evidence. `start` saves the override for the session. With a configured standard, `verify` allows first uses of tracked constructs that edition supports and rejects new uses of tracked constructs it excludes. When the configured standard is unknown, it falls back to the features in the original file.
+
+The tool tracks language constructs such as:
 
 - `//` comments;
 - declarations after statements in a block, and declarations in a `for` header;
 - `bool`, `true`, `false` and `_Bool`;
-- `inline`, `restrict`, `long long`, `_Static_assert`, `__func__`;
+- `inline`, `restrict`, `long long`, `_Static_assert` and `__func__`;
 - designated initializers and compound literals.
 
-Names from headers that the file does not include are not available either. `verify` reports a new name that it cannot resolve.
+The standard establishes which syntax can be used. Names still need to be available in the edited region. For example, before C23, `bool` needs an existing header or project declaration. Check that needed declarations are visible in every build configuration. The dialect check covers the tracked constructs and does not compile the file.
 
 ## Things that are not yours to change
 

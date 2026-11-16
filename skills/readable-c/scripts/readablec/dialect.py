@@ -1,17 +1,14 @@
-"""The C language features a stretch of code uses.
-
-Without a compiler, the main protection against an edit that does not compile
-is to use only what the file already uses: a C89 code base rejects `//`
-comments, declarations after statements and `bool`.
-"""
+"""The tracked C language features a stretch of code uses."""
 
 from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from . import lexer, syntax
+from .standard import C23
 
 if TYPE_CHECKING:
     from tree_sitter import Node
@@ -22,26 +19,45 @@ CONSTRUCTS = {
     "line-comment": "`//` comments",
     "mixed-declarations": "declarations after statements in a block",
     "for-declaration": "declarations in a `for` initializer",
-    "bool": "`bool`, `true` and `false` from <stdbool.h>",
+    "bool": "`bool`, `true` and `false`",
     "_Bool": "the `_Bool` type",
     "inline": "`inline` functions",
     "designated-initializer": "designated initializers (`.field =`, `[index] =`)",
     "compound-literal": "compound literals (`(type){ ... }`)",
     "restrict": "`restrict` pointers",
     "long-long": "`long long`",
-    "static-assert": "`_Static_assert`",
+    "static-assert": "`_Static_assert` or `static_assert`",
+    "static-assert-one-argument": "a static assertion without a message",
+    "generic": "`_Generic` selections",
+    "constexpr": "`constexpr` constants",
+    "nullptr": "`nullptr`",
+    "attribute": "`[[...]]` attributes",
     "func-name": "`__func__`",
 }
 
-C99_HINTS = (
-    "line-comment",
-    "mixed-declarations",
-    "for-declaration",
-    "bool",
-    "designated-initializer",
-)
+MINIMUM_EDITION = {
+    **dict.fromkeys(CONSTRUCTS, 1999),
+    "static-assert": 2011,
+    "generic": 2011,
+    "static-assert-one-argument": C23,
+    "constexpr": C23,
+    "nullptr": C23,
+    "attribute": C23,
+}
 
 _LONG_LONG_SUFFIX = re.compile(r"[lL]{2}[uU]?$|[uU][lL]{2}$")
+
+
+@dataclass(frozen=True)
+class Occurrence:
+    kind: str
+    start: int
+    spelling: str = ""
+    depends_on: int | None = None
+
+    @property
+    def identity(self) -> tuple[str, str]:
+        return self.kind, self.spelling
 
 
 def find_constructs(
@@ -54,19 +70,37 @@ def find_constructs(
     """Each construct used in [start, end), with the first line that uses it."""
     stop = end if end is not None else len(source.data)
     found: dict[str, int] = {}
+    for occurrence in occurrences(root, tokens, start, stop):
+        offset = occurrence.start
+        if offset >= stop and occurrence.depends_on is not None:
+            offset = occurrence.depends_on
+        found.setdefault(occurrence.kind, source.line_of(offset))
+    return found
 
-    def note(construct: str, line: int) -> None:
-        found.setdefault(construct, line)
 
+def occurrences(
+    root: Node, tokens: Sequence[lexer.Token], start: int, stop: int
+) -> list[Occurrence]:
+    found = []
     for token in tokens:
         is_in_range = start <= token.start < stop
         is_line_comment = token.kind == lexer.COMMENT and token.text.startswith(b"//")
         if is_in_range and is_line_comment:
-            note("line-comment", source.line_of(token.start))
+            found.append(Occurrence("line-comment", token.start))
     for node in _nodes_in_range(root, start, stop):
+        if node.type == "compound_statement":
+            found.extend(_mixed_declarations(node, start, stop))
+        if node.start_byte < start:
+            continue
+        if node.type == "call_expression":
+            assertion = _assertion(node)
+            if assertion is not None:
+                found.append(assertion)
         construct = _construct_of(node)
-        if construct is not None:
-            note(construct, syntax.start_line(node))
+        if construct is None:
+            continue
+        spelling = syntax.text(node) if construct == "bool" else ""
+        found.append(Occurrence(construct, node.start_byte, spelling))
     return found
 
 
@@ -77,8 +111,7 @@ def _nodes_in_range(root: Node, start: int, stop: int) -> list[Node]:
         node = stack.pop()
         if not syntax.overlaps(node, start, stop):
             continue
-        if start <= node.start_byte:
-            result.append(node)
+        result.append(node)
         stack.extend(reversed(node.children))
     return result
 
@@ -92,18 +125,22 @@ _SPELLED_CONSTRUCTS = {
     ("type_identifier", "_Bool"): "_Bool",
     ("storage_class_specifier", "inline"): "inline",
     ("type_qualifier", "restrict"): "restrict",
-    ("identifier", "_Static_assert"): "static-assert",
-    ("identifier", "static_assert"): "static-assert",
+    ("type_qualifier", "constexpr"): "constexpr",
+    ("null", "nullptr"): "nullptr",
     ("identifier", "__func__"): "func-name",
+}
+
+_NODE_CONSTRUCTS = {
+    "compound_literal_expression": "compound-literal",
+    "generic_expression": "generic",
+    "attribute_declaration": "attribute",
 }
 
 
 def _construct_of(node: Node) -> str | None:
     node_type = node.type
-    if node_type == "compound_literal_expression":
-        return "compound-literal"
-    if node_type == "compound_statement":
-        return "mixed-declarations" if _declares_after_statement(node) else None
+    if node_type in _NODE_CONSTRUCTS:
+        return _NODE_CONSTRUCTS[node_type]
     if node_type == "for_statement":
         initializer = node.child_by_field_name("initializer")
         is_declaration = initializer is not None and initializer.type == "declaration"
@@ -115,6 +152,19 @@ def _construct_of(node: Node) -> str | None:
     if _is_long_long(node_type, spelling):
         return "long-long"
     return _SPELLED_CONSTRUCTS.get((node_type, spelling))
+
+
+def _assertion(node: Node) -> Occurrence | None:
+    call = node.child_by_field_name("function")
+    if call is None or call.type != "identifier":
+        return None
+    spelling = syntax.text(call)
+    if spelling not in {"_Static_assert", "static_assert"}:
+        return None
+    arguments = node.child_by_field_name("arguments")
+    one_argument = arguments is not None and len(syntax.named_children(arguments)) == 1
+    kind = "static-assert-one-argument" if one_argument else "static-assert"
+    return Occurrence(kind, node.start_byte, spelling)
 
 
 def _is_long_long(node_type: str, spelling: str) -> bool:
@@ -130,6 +180,7 @@ _SPELLED = {
     "sized_type_specifier",
     "true",
     "false",
+    "null",
     "primitive_type",
     "type_identifier",
 }
@@ -146,22 +197,23 @@ DECLARATION_TYPES = {
 }
 
 
-def _declares_after_statement(block: Node) -> bool:
-    seen_statement = False
+def _mixed_declarations(block: Node, start: int, stop: int) -> list[Occurrence]:
+    found = []
+    first_statement = None
     for child in block.named_children:
         is_declaration = child.type in DECLARATION_TYPES
-        if is_declaration and seen_statement:
-            return True
+        if is_declaration and first_statement is not None:
+            is_in_range = start <= child.start_byte < stop or start <= first_statement < stop
+            if is_in_range:
+                found.append(
+                    Occurrence("mixed-declarations", child.start_byte, depends_on=first_statement)
+                )
         is_neutral = child.type == "comment" or child.type.startswith("preproc")
-        if not is_neutral and not is_declaration:
-            seen_statement = True
-    return False
+        if first_statement is None and not is_neutral and not is_declaration:
+            first_statement = child.start_byte
+    return found
 
 
 def new_constructs(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
     """Constructs that `after` uses and `before` never did."""
     return {construct: line for construct, line in after.items() if construct not in before}
-
-
-def looks_like_c89(constructs: dict[str, int]) -> bool:
-    return not any(construct in constructs for construct in C99_HINTS)

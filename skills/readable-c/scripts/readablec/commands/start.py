@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from .. import includes, regions, state
+from .. import includes, regions, standard, state
 from ..analysis import Analysis
 from ..context import RegionContext, region_context
 from ..rules import run_rules
@@ -31,6 +31,7 @@ def start(  # noqa: PLR0913  the command's options
     include_dirs: Sequence[Path],
     quiet: bool,
     as_json: bool,
+    standard_override: standard.CStandard | None = None,
 ) -> int:
     output = Output(as_json)
     if state.exists(path) and not replace:
@@ -41,7 +42,7 @@ def start(  # noqa: PLR0913  the command's options
             "`finish`, undo it with `restore`, or pass --replace to start over from the file as it is now."
         )
     data = read_file(path)
-    analysis = Analysis(data, path)
+    analysis = Analysis(data, path, standard_override or standard.detect(path))
     try:
         resolution = regions.resolve(
             analysis.source,
@@ -67,6 +68,7 @@ def start(  # noqa: PLR0913  the command's options
         baseline=[finding.to_json() for finding in baseline.findings],
         frozen=frozen,
         notes=resolution.notes,
+        standard_override=standard_override.name if standard_override is not None else None,
     )
     state.save(snapshot)
 
@@ -84,7 +86,7 @@ def start(  # noqa: PLR0913  the command's options
             for line in numbered_lines(analysis.source, region.start, region.end, encoding):
                 output.line(line)
     _print_context(output, context, frozen)
-    output.section("Conventions of this file (write new code the same way)")
+    output.section("Project C standard and file conventions")
     for line in analysis.conventions.describe():
         output.line(f"- {line}")
     output.section(f"Baseline findings ({len(baseline.findings)})")

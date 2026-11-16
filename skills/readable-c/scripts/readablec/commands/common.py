@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
-from .. import guard, state
+from .. import guard, standard, state
 from ..analysis import Analysis
+from ..encoding import detect_encoding
 from ..findings import Finding
 from ..issues import Issue
 from ..regions import Region
@@ -75,11 +79,15 @@ class Session:
     def regions(self) -> list[Region]:
         return self.snapshot.regions
 
+    @cached_property
+    def configured_standard(self) -> standard.CStandard | None:
+        return self.snapshot.configured_standard()
+
     def original_analysis(self) -> Analysis:
-        return Analysis(self.snapshot.original, self.snapshot.path)
+        return Analysis(self.snapshot.original, self.snapshot.path, self.configured_standard)
 
     def current_analysis(self) -> Analysis:
-        return Analysis(self.current, self.snapshot.path)
+        return Analysis(self.current, self.snapshot.path, self.configured_standard)
 
 
 def open_session(path: Path) -> Session:
@@ -115,6 +123,27 @@ def numbered_lines(source: SourceText, start: int, end: int, encoding: str) -> l
         f"{str(line).rjust(width)}  {source.line_bytes(line).decode(encoding, errors='backslashreplace')}"
         for line in range(first, last + 1)
     ]
+
+
+def region_diffs(session: Session) -> Iterator[tuple[Region, list[str]]]:
+    """Compare only editable bytes and show where each side starts in the file."""
+    original = session.snapshot.original
+    old_source = SourceText(original)
+    new_source = SourceText(session.current)
+    encoding = detect_encoding(original).name
+    for region, (start, end) in zip(session.regions, session.spans, strict=True):
+        before = original[region.start : region.end]
+        after = session.current[start:end]
+        old_line = old_source.line_of(region.start)
+        new_line = new_source.line_of(start)
+        diff = difflib.unified_diff(
+            [line.decode(encoding, "backslashreplace") for line in before.splitlines()],
+            [line.decode(encoding, "backslashreplace") for line in after.splitlines()],
+            fromfile=f"original (from line {old_line})",
+            tofile=f"current (from line {new_line})",
+            lineterm="",
+        )
+        yield region, list(diff)
 
 
 def configure_console() -> None:
