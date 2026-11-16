@@ -8,7 +8,8 @@ drops what those refactors change and what cannot change behavior:
 - the names of locals, parameters and labels: a variable becomes its order of
   first appearance and its type, so a rename matches, a changed type does not,
   and a rename that captures another name binds differently and does not match;
-- where a local is declared: `int x = E;` reads as the statement `x = E;`;
+- where a local is declared: `int x = E;` reads as the statement `x = E;`.
+  A local declared in a `for` header keeps its loop lifetime if its address is taken;
 - braces around a single statement, `else` after a branch that always leaves,
   `else { if }`, nested `if`s without `else` (one `if` with `&&`), and plain
   nested blocks;
@@ -358,6 +359,8 @@ class Canonicalizer:
 
     def declaration(self, node: Node) -> list[Canonical]:
         """Locals become assignments; static locals, arrays and others stay declarations."""
+        parent = node.parent
+        is_for_initializer = parent is not None and parent.type == "for_statement"
         storage = tuple(
             sorted(
                 syntax.text(child)
@@ -383,6 +386,9 @@ class Canonicalizer:
             )
             if is_plain_local:
                 assert symbol is not None, "checked above"
+                if is_for_initializer and self.scope.is_address_taken(symbol):
+                    # A pointer to the local can survive after the loop ends.
+                    result.append(("for-local-lifetime", self.variable(symbol)))
                 if value is not None:
                     result.append(self._assigned(self.variable(symbol), value))
                 continue

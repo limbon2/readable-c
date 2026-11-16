@@ -141,6 +141,41 @@ def test_for_loops_without_continue_read_as_while_loops():
     assert tier(with_continue, naive) == 2
 
 
+def test_loop_counter_can_move_into_for_header_without_changing_type():
+    before = """\
+typedef unsigned int UINT32;
+UINT32 f(UINT32 count)
+{
+    UINT32 sum = 0;
+    UINT32 i;
+    for (i = 0; i < count; i++) {
+        sum += i;
+    }
+    return sum;
+}
+"""
+    after = before.replace("    UINT32 i;\n    for (i = 0;", "    for (UINT32 i = 0;")
+    assert tier(before, after) == 1
+    assert tier(after, before) == 1
+
+
+def test_address_taken_loop_counter_cannot_be_proven_with_a_shorter_lifetime():
+    before = """\
+typedef unsigned int UINT32;
+UINT32 f(void)
+{
+    UINT32 *saved;
+    UINT32 i;
+    for (i = 0; i < 4; i++) {
+        saved = &i;
+    }
+    return *saved;
+}
+"""
+    after = before.replace("    UINT32 i;\n    for (i = 0;", "    for (UINT32 i = 0;")
+    assert tier(before, after) == 2
+
+
 def test_choices_written_as_if_else_are_tier_1():
     returned = "int f(int t)\n{\n    return t > 1000 ? (t > 5000 ? 2 : 1) : 0;\n}\n"
     as_ifs = "int f(int t)\n{\n    if (t > 1000) {\n        if (t > 5000) {\n            return 2;\n        }\n        return 1;\n    }\n    return 0;\n}\n"

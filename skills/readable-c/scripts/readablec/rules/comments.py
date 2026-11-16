@@ -159,7 +159,7 @@ def _bits_message() -> str:
     return (
         "Say what these bits mean: the field, the encoding or the trick, for example "
         "`/* bits 4-7 of the status byte: the channel number */` or `/* 16-bit little-endian */`. "
-        "A named mask or shift (`enum { CHANNEL_SHIFT = 4 };`) can replace the comment."
+        "A named mask or shift can replace the comment when its name says what the bits mean."
     )
 
 

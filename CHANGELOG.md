@@ -6,8 +6,15 @@ All notable changes to readable-c are recorded here. The format follows [Keep a 
 
 ### Changed
 
+- Constant guidance uses typed objects for standalone values and reserves enums for related alternatives. The reader checks for newly introduced standalone enum constants and considers the project's integer constant expression requirements.
+- The workflow pairs new locals with their initializers and prefers loop-local counters when the target and lifetime allow it. The reader checks changed indentation and covers all documentation in scope when the task calls for a format conversion.
 - `doctor`, `start` and `verify` use the file's configured C standard when available. A confirmed `--std` override can be saved for the refactor session. The original file's tracked features remain the fallback when the standard is unknown.
 - The reader brief shows the selected regions' diff and asks the reader to flag older practices and comment format mismatches introduced by the refactor. Function documentation follows the project's format, including Doxygen where established.
+
+### Fixed
+
+- `indent-style` catches overindented statements when the surrounding block establishes their indentation level.
+- Tier 1 distinguishes a loop-header declaration from a longer-lived declaration when the local's address is taken.
 
 ## [0.4.0] - 2026-11-12
 

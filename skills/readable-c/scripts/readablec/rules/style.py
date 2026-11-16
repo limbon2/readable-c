@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from .. import conventions, ctree, lexer, syntax
@@ -12,9 +13,12 @@ from .engine import RuleContext, on, on_function, on_lines
 if TYPE_CHECKING:
     from tree_sitter import Node
 
+    from ..source import SourceText
+
 MAX_FUNCTION_LINES = 60
 MAX_NESTING = 3
 MAX_PARAMETERS = 5
+MIN_BLOCK_PEERS = 2
 EXEMPT_NUMBERS = {"0", "1", "2", "-1", "0.0", "1.0", "0x0", "0x00", "00"}
 MAGIC_EXEMPT_CONTEXTS = {
     "enumerator",
@@ -46,7 +50,7 @@ def magic_number(node: Node, context: RuleContext) -> None:
     )
     declaration = syntax.enclosing(node, {"declaration"})
     names_a_constant = declaration is not None and any(
-        syntax.text(child) == "const"
+        syntax.text(child) in {"const", "constexpr"}
         for child in declaration.children
         if child.type == "type_qualifier"
     )
@@ -56,9 +60,9 @@ def magic_number(node: Node, context: RuleContext) -> None:
         "magic-number",
         ADVICE,
         node,
-        f"Name `{syntax.text(node)}` unless it explains itself. In a region, `enum {{ NAME = "
-        f"{syntax.text(node)} }};` inside the function keeps the type int; use it only when the "
-        "literal was an int (no suffix, at most 32767).",
+        f"Name `{syntax.text(node)}` unless it explains itself. Match the literal's type. "
+        "Use a local const for an ordinary value read. If the use requires an integer constant "
+        "expression, see Constants in references/rules.md.",
     )
 
 
@@ -231,6 +235,64 @@ def indent_style(context: RuleContext) -> None:
                     f"The file indents with {expected}; this line does not.",
                 )
             )
+
+
+@on("compound_statement")
+def block_indent_style(block: Node, context: RuleContext) -> None:
+    character = {"tabs": b"\t", "spaces": b" "}.get(context.conventions.indent_char)
+    if character is None or block.has_error:
+        return
+    # Labels and conditional directives can establish groups with their own indentation.
+    children = syntax.named_children(block)
+    has_special_layout = any(
+        child.type in {"case_statement", "labeled_statement"} or child.type.startswith("preproc")
+        for child in children
+    )
+    if has_special_layout or syntax.enclosing(block, {"parenthesized_expression"}) is not None:
+        return
+    source = context.analysis.source
+    peers = []
+    for child in children:
+        if child.type == "declaration" or child.type.endswith("_statement"):
+            indent = _own_line_indent(child, source, character)
+            if indent is not None:
+                peers.append((child, indent))
+    if len(peers) < MIN_BLOCK_PEERS:
+        return
+    counts = Counter(indent for _, indent in peers)
+    expected, matches = counts.most_common(1)[0]
+    if matches * 2 <= len(peers):
+        width = 1 if character == b"\t" else context.conventions.indent_width
+        expected = _brace_anchored_indent(block, source, character, width)
+        if expected is None or expected not in counts:
+            return
+    for child, indent in peers:
+        if len(indent) > len(expected):
+            context.report(
+                "indent-style",
+                RULE,
+                child,
+                "This statement is indented farther than its peers in the same block. "
+                "Align it with them.",
+            )
+
+
+def _own_line_indent(node: Node, source: SourceText, character: bytes) -> bytes | None:
+    before = source.data[source.line_start(syntax.start_line(node)) : node.start_byte]
+    return None if before.strip(character) else before
+
+
+def _brace_anchored_indent(
+    block: Node, source: SourceText, character: bytes, width: int | None
+) -> bytes | None:
+    """Use matching brace-line indents as a tie-breaker, with a matching peer."""
+    if width is None:
+        return None
+    opening = conventions.leading_whitespace(source.line_bytes(syntax.start_line(block)))
+    closing = block.children[-1]
+    if closing.type != "}" or _own_line_indent(closing, source, character) != opening:
+        return None
+    return opening + character * width
 
 
 @on_lines

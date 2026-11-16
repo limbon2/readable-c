@@ -37,7 +37,7 @@ The pass is done when a round that saw the final code returns an empty list A an
 Each A item comes with the reader's answer. Check it against the code first: readers misread too. Then put it where the reader needed it:
 
 - A name the reader had to work out: rename, so the name says what the reader worked out.
-- A number, size, offset or bound: name it (`enum { RECORD_HEADER_LEN = 6 };`) or say in a comment which fields add up to it.
+- A number, size, offset or bound: use a [typed constant](rules.md#constants) or say in a comment which fields add up to it.
 - A step the reader traced by hand: say what it computes in a comment, or extract it into a helper whose name says it.
 - A function whose purpose or ownership the reader worked out: write its contract comment.
 - A surprising behavior: say what the code does in a comment, and keep the behavior. Whether it is intended is a B question.
@@ -56,7 +56,7 @@ Check the diff and the project's supported targets. For example, a new loop coun
 
 Make the change only when it fits the project, stays in the regions and preserves behavior. Run `verify` after each edit. Keep the current code and record the reason when the project uses a required API or type, a change would affect callers or evaluation, or compatibility cannot be established. Raising the required C standard, changing a public interface or altering observable behavior goes beyond this pass.
 
-For function documentation, check the relevant project guidance or comparable function comments. Follow the project's format, such as Doxygen where established. Keep relevant tags and update renamed parameters in them.
+Check the relevant project guidance or comparable documentation. If the task asks for a documentation conversion, give the reader the requested format and scope. Check function contracts, callbacks and other documentation in those regions, including inherited comments. Keep relevant tags and update renamed parameters in them.
 
 ## The brief
 
@@ -95,10 +95,18 @@ C. Older practices and comment format mismatches introduced by the refactor.
    replacement. Give the current line, what the diff shows was introduced, a
    replacement, and the evidence that the configured standard or project conventions
    support it. Consider scope, evaluation, types, API contracts and portability.
-   For function docs, flag a new comment that departs from a project rule or a
-   comparable documented function, or an edit that drops documentation tags
-   that still apply. Ask under B if compatibility, equivalence or the expected comment
-   format depends on missing project information.
+   Check new enums used solely to name sizes, limits, shifts or other independent
+   constants. Flag them when a typed constant or another project-approved form
+   preserves the type and any requirement for an integer constant expression.
+   Flag new declarations separated from initialization, including loop-only counters,
+   when combining them preserves scope and evaluation under the configured standard.
+   Check indentation on changed lines against other statements in the same block.
+   For documentation, including callback contracts, flag a new or edited comment
+   that departs from the format in a project rule or a comparable documented function,
+   or drops tags that still apply. If the task requests a documentation conversion,
+   check every documentation comment in its selected regions, including comments
+   absent from the diff. Ask under B if compatibility, equivalence or comment format
+   depends on missing project information.
    Flag new uses, including reuse of an existing idiom in a new place. Skip uses
    that were only moved, renamed or reformatted, and choices justified by the
    project's conventions or compatibility requirements.

@@ -16,7 +16,7 @@ Contents: [Evaluation](#evaluation) · [Types](#types) · [Macros](#macros) · [
 
 - A named value takes the type of its expression after the usual conversions. `unsigned char` operands promote to `int`; `a + b` of two `uint16_t` is an `int`. Declaring the variable narrower truncates; declaring it wider can change later arithmetic. When unsure, use the type of the widest operand, and keep signedness.
 - Comparing signed and unsigned values converts the signed one. Changing a type in a comparison can flip its result for negative values.
-- Literal types depend on the value and the suffix: `40000` is `long` where `int` is 16 bits, and `0xFFFF` may be `unsigned`. Replace a literal by an enum constant (always `int`) only for a plain int literal up to 32767.
+- Literal types depend on the base, value and suffix. For example, `40000` is `long` where `int` is 16 bits, and `0xFFFF` may be `unsigned int`. Preserve the type when naming the literal. Check whether the context requires an integer constant expression, such as a `case` label or fixed array bound. See [Constants](rules.md#constants).
 - `bool` and `_Bool` store 0 or 1; `BOOL` is usually `int` and stores anything. `flag ? 1 : 0` and `flag != 0` normalize; `flag` alone does not.
 - `char` may be signed or unsigned depending on the compiler. Keep casts such as `(unsigned char)c` before `ctype.h` calls.
 

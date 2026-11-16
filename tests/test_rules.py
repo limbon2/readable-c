@@ -161,9 +161,47 @@ def test_indent_style_leaves_aligned_continuation_lines_alone():
     assert [finding.snippet for finding in findings(code, "indent-style")] == ["stray = 1;"]
 
 
+@pytest.mark.parametrize("indent", ["    ", "\t"])
+def test_indent_style_finds_a_return_still_indented_under_a_braced_guard(indent):
+    code = (
+        f"int f(int value)\n{{\n{indent}if (value < 0) {{\n"
+        f"{indent * 2}return 0;\n{indent}}}\n{indent * 2}return value;\n}}\n"
+    )
+    [finding] = findings(code, "indent-style")
+    assert (finding.line, finding.snippet) == (6, "return value;")
+    aligned = code.replace(indent * 2 + "return value;", indent + "return value;")
+    assert not findings(aligned, "indent-style")
+
+
+def test_indent_style_can_use_frozen_peers_for_a_selected_statement():
+    code = "int f(int value)\n{\n    value++;\n    value++;\n        return value;\n}\n"
+    analysis = analyse(code)
+    source = analysis.source
+    report = run_rules(analysis, [(source.line_start(5), source.line_end(5))])
+    [finding] = [item for item in report.findings if item.rule == "indent-style"]
+    assert finding.line == 5
+    outside = run_rules(analysis, [(source.line_start(4), source.line_end(4))])
+    assert not any(item.rule == "indent-style" for item in outside.findings)
+
+
+@pytest.mark.parametrize("marker", ["on_error:\n        value = 0;", "#ifdef FEATURE\n#endif"])
+def test_indent_style_leaves_blocks_with_special_layout_alone(marker):
+    code = (
+        f"int f(int value)\n{{\n    value++;\n    value++;\n{marker}\n        return value;\n}}\n"
+    )
+    assert not findings(code, "indent-style")
+
+
 def test_magic_numbers_and_their_exemptions():
     code = body("x = a * 60;\nb = a << 4;\nint table[] = {3, 5, 7};\nreturn_code = -1;")
-    assert [finding.snippet for finding in findings(code, "magic-number")] == ["60"]
+    [finding] = findings(code, "magic-number")
+    assert finding.snippet == "60"
+    assert "local const" in finding.message
+
+
+def test_typed_constant_initializers_are_already_named():
+    code = body("const int packet_limit = 60;\nconstexpr int header_length = 12;")
+    assert findings(code, "magic-number") == []
 
 
 def test_side_effects_spare_the_copy_idiom():

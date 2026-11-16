@@ -125,7 +125,7 @@ inventory.c:51: error: [names] `totl` is not declared in the region, ...
   - joins an `else if` whose body repeats the branch before it, and consecutive `if`s whose identical bodies always leave, into one condition with `||`; pushes `!` through `&&` and `||`;
   - merges nested `if`s without `else` into one `if` with `&&`, and flattens `&&` and `||` chains;
   - in a loop body, reads `if (c) { x; continue; } rest` as `if (c) { x } else { rest }`;
-  - reads a `for` loop whose body has no `continue` of its own as `init; while (test) { body step }`;
+  - reads a `for` loop whose body has no `continue` of its own as `init; while (test) { body step }` and keeps the loop lifetime of a header local whose address is taken;
   - reads `return c ? a : b;` and `x = c ? a : b;` as an `if` with `else`;
   - reads `int x = E;` as `x = E;` and drops declarations without a value;
   - normalizes `E != 0`, `E == 0`, `!E`, `!!E`, `NULL`, `c ? 1 : 0`, `c ? 0 : 1`, the order of comparisons, and comparisons of two integer literals (`1 == 1` is `1`);

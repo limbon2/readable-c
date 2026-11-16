@@ -56,10 +56,18 @@ C. Older practices and comment format mismatches introduced by the refactor.
    replacement. Give the current line, what the diff shows was introduced, a
    replacement, and the evidence that the configured standard or project conventions
    support it. Consider scope, evaluation, types, API contracts and portability.
-   For function docs, flag a new comment that departs from a project rule or a
-   comparable documented function, or an edit that drops documentation tags
-   that still apply. Ask under B if compatibility, equivalence or the expected comment
-   format depends on missing project information.
+   Check new enums used solely to name sizes, limits, shifts or other independent
+   constants. Flag them when a typed constant or another project-approved form
+   preserves the type and any requirement for an integer constant expression.
+   Flag new declarations separated from initialization, including loop-only counters,
+   when combining them preserves scope and evaluation under the configured standard.
+   Check indentation on changed lines against other statements in the same block.
+   For documentation, including callback contracts, flag a new or edited comment
+   that departs from the format in a project rule or a comparable documented function,
+   or drops tags that still apply. If the task requests a documentation conversion,
+   check every documentation comment in its selected regions, including comments
+   absent from the diff. Ask under B if compatibility, equivalence or comment format
+   depends on missing project information.
    Flag new uses, including reuse of an existing idiom in a new place. Skip uses
    that were only moved, renamed or reformatted, and choices justified by the
    project's conventions or compatibility requirements.

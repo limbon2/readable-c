@@ -298,22 +298,36 @@ size_t n = strnlen(name, cap);
 
 `int i, total = 0;` becomes two declarations. `verify` treats both forms as the same.
 
+### Local declarations
+
+Declare and initialize a new local where its value is first available and near where it is used. If the target requires declarations at block start or assignment depends on control flow, keep the declaration and assignment where they preserve behavior.
+
+For a loop-only counter on C99 or later, put the declaration and initializer together in the `for` header, for example `for (UINT32 i = 0; i < count; ++i)` when `UINT32` is the existing type. Keep the enclosing scope if code after the loop uses the counter or a pointer to it. Preserve the type, the point where initialization runs, and the binding of any name in the initializer. Check macros and jumps for hidden uses and ways to bypass initialization.
+
 ## Constants
 
 ### magic-number (advice)
 
 ```c
 /* before */
-strncpy(entry->name, name, 31);
+if (length > 31) {
+    return TOO_LONG;
+}
+
 /* after, inside the function */
-enum { LAST_NAME_INDEX = 31 };
-strncpy(entry->name, name, LAST_NAME_INDEX);
+const int MAX_NAME_LENGTH = 31;
+if (length > MAX_NAME_LENGTH) {
+    return TOO_LONG;
+}
 ```
 
-- In a region, define the constant inside the function (`enum { NAME = 31 };`) or in the helper slot. A new `#define` needs a reason in the report, and `verify` rejects one whose name the rest of the file uses.
-- An enum constant has the type `int`. Replace a literal with it only when the literal was a plain `int` (no `u`, `l` or `f` suffix, at most 32767). Otherwise use the file's constant style with the same type, such as `static const unsigned long`.
+- For an ordinary value read, use a `const` object with the literal's type. Declare it in the narrowest scope that serves its uses. Ensure every path to a use runs the initializer. Use `static const` when static storage is needed or it is the project's convention for constants and preserves behavior. Keep the original literal's signedness, suffix and type.
+- For example, `static const unsigned int MAX_NAME_WCHARS = 260U;` preserves the type of `260U`. If the original used the signed literal `260`, check conversions in comparisons and arithmetic before adopting an unsigned type.
+- Use enums for values of one kind, such as states, message kinds or result codes. An independent length, limit, shift or mask can have its own typed constant.
+- Some uses, such as `case` labels and fixed array bounds, need an integer constant expression. A `const` object does not provide one in standard C through C23. Use a same-type `constexpr` object where the project's C23 toolchain supports it. On earlier targets use an existing suitable named constant, or a type-preserving object-like macro when project conventions and the region guard allow it. If neither fits, leave the literal and explain its meaning. Use a standalone enum for this purpose only when the project calls for that pattern, and explain the compatibility requirement.
+- Preprocessor tests need a macro or literal. A new `#define` needs a reason in the report, and `verify` rejects one whose name the rest of the file uses. Check all uses for type, evaluation and scope changes, including macros that use the argument's spelling.
 - Exempt: 0, 1, 2, -1, shift counts, array sizes, initializer tables and values that already name themselves.
-- `verify` proves a literal replaced by an enum constant or an object-like macro that the file defines once (tier 1).
+- `verify` has tier 1 proofs for some enum and macro constants. A type-preserving `const` or `constexpr` edit may need a tier 2 explanation. Explain why the declaration and its uses keep behavior.
 
 ## Functions and helpers
 
@@ -373,7 +387,7 @@ if (WaitForSingleObject(worker, 500) == WAIT_TIMEOUT) {
 pos = pos + RECORD_HEADER_LEN + payload_len + CRC_LEN;
 ```
 
-A name often says it better than a comment: `enum { CHANNEL_SHIFT = 4, CHANNEL_MASK = 0x0F };` at the top of the function (see `magic-number`). A comment changes no token and a named enum constant is proven by tier 1, so neither puts behavior at risk. Keep the shape of the expression when you name its parts: for `pos = pos + 6 + payload_len + 2`, the named form `pos = pos + RECORD_HEADER_LEN + payload_len + CRC_LEN` reaches tier 1, while `pos += RECORD_HEADER_LEN + payload_len + CRC_LEN` groups the sum differently and only reaches tier 2.
+A name often says it better than a comment. For example, use `const int CHANNEL_SHIFT = 4;` and `const int CHANNEL_MASK = 0x0F;` when the values are read in an ordinary expression. Keep the original grouping when you name parts of an expression. For `pos = pos + 6 + payload_len + 2`, write `pos = pos + RECORD_HEADER_LEN + payload_len + CRC_LEN`. Writing `pos += RECORD_HEADER_LEN + payload_len + CRC_LEN` groups the sum differently.
 
 ### function-contract (rule)
 
@@ -385,7 +399,7 @@ A function in a region that is longer than 10 lines starts with a contract comme
 static int queue_pop(struct queue *q, struct record *rec)
 ```
 
-Say what it does, what it returns on success and failure, and who frees memory it allocates or takes. Keep it short and write what the code shows. If the project uses Doxygen for function contracts, match the established delimiter and tags, such as `@param` and `@return`. When a parameter is renamed, update its tag in any edited contract.
+Say what it does, what it returns on success and failure, and who frees memory it allocates or takes. Keep it short and write what the code shows. If the project uses Doxygen for function contracts, match the established delimiter and tags, such as `@param` and `@return`. This applies to callbacks and static functions where the project's documentation convention covers them. When a parameter is renamed, update its tag in any edited contract.
 
 ### Only true comments
 
@@ -400,14 +414,14 @@ A wrong comment is worse than none, because the reader trusts it. Write only wha
 
 - Put a comment above the line or block it explains, or at the end of a short line. One line is usually enough.
 - Say why, or what something means. Never narrate what the code does step by step: `i++; /* increment i */` repeats the code, so delete such comments.
-- Follow the project's documentation and inline comment conventions. Use nearby examples for the same kind of comment when the project has no written guidance. Use the language of the other comments and syntax supported by the target standard.
+- Apply the required documentation format to all documentation in the requested regions when the task calls for a format cleanup. Follow the project's inline comment conventions for local implementation notes. Use nearby examples for the same kind of comment when the project has no written guidance. Use the language of the other comments and syntax supported by the target standard.
 - In a file that is not UTF-8 (`doctor` shows the encoding, for example cp1251), new non-ASCII text needs converting: `verify` reports it, and `repair --encoding cp1251` converts the new lines. Plain ASCII avoids the step.
 - Keep comments that carry information, such as license headers, author notes and the reasons for workarounds. Rewrite a comment that the refactor made wrong: after a rename, `verify` points at old comments that still use the old name, such as a header comment that says `ctx->buf` once the parameter is `stream`.
 - `commented-out-code` (advice): delete disabled code, because version control keeps it. Ask first when the project has no version control.
 
 ## Layout
 
-- `indent-style` (rule): new lines use the file's indentation (tabs or spaces, and the width `doctor` reports).
+- `indent-style` (rule): use the file's tabs or spaces and align statements at the same nesting level. Check the changed lines against their enclosing block, including `return` after a braced `if`.
 - Match the brace placement, spacing and line length of the code around the region.
 - With a project `.clang-format`, run `format`; it touches the regions only.
 
